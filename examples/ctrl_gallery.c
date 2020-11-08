@@ -10,9 +10,6 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "deps/stb_truetype.h"
 
-#include "deps/das.h"
-#include "deps/das.c"
-
 #include "../vui.h"
 #include "../vui.c"
 
@@ -27,181 +24,9 @@
 // =====================================
 //
 
-#define vui_default_padding VuiThickness_init_even(8.0)
-#define vui_default_margin VuiThickness_init_even(4.0)
-
-#define vui_color_white VuiColor_init(0xfa, 0xfa, 0xfa, 0xff)
-#define vui_color_gray VuiColor_init(0xbd, 0xbd, 0xbd, 0xff)
-#define vui_color_dark_gray VuiColor_init(0x46, 0x46, 0x46, 0xff)
-#define vui_color_very_dark_grayish_blue VuiColor_init(0x32, 0x39, 0x3d, 0xff)
-#define vui_color_very_dark_gray VuiColor_init(0x37, 0x37, 0x37, 0xff)
-#define vui_color_black VuiColor_init(0x2d, 0x2d, 0x2d, 0xff)
-
-#define vui_color_alizarin VuiColor_init(0xe7, 0x4c, 0x3c, 0xff)
-#define vui_color_pomegranate VuiColor_init(0xc0, 0x39, 0x2b, 0xff)
-#define vui_color_carrot VuiColor_init(0xe6, 0x7e, 0x22, 0xff)
-#define vui_color_pumpkin VuiColor_init(0xd3, 0x54, 0x00, 0xff)
-#define vui_color_sun_flower VuiColor_init(0xf1, 0xc4, 0x0f, 0xff)
-#define vui_color_orange VuiColor_init(0xf3, 0x9c, 0x12, 0xff)
-#define vui_color_emerald VuiColor_init(0x2e, 0xcc, 0x71, 0xff)
-#define vui_color_nephritis VuiColor_init(0x27, 0xae, 0x60, 0xff)
-#define vui_color_turquoise VuiColor_init(0x1a, 0xbc, 0x9c , 0xff)
-#define vui_color_green_sea VuiColor_init(0x16, 0xa0, 0x85, 0xff)
-#define vui_color_peter_river VuiColor_init(0x34, 0x98, 0xdb, 0xff)
-#define vui_color_belize_hole VuiColor_init(0x29, 0x80, 0xb9, 0xff)
-#define vui_color_amethyst VuiColor_init(0x9b, 0x59, 0xb6, 0xff)
-#define vui_color_wisteria VuiColor_init(0x8e, 0x44, 0xad, 0xff)
-#define vui_color_clouds VuiColor_init(0xec, 0xf0, 0xf1, 0xff)
-#define vui_color_silver VuiColor_init(0xbd, 0xc3, 0xc7, 0xff)
-#define vui_color_concrete VuiColor_init(0x95, 0xa5, 0xa6, 0xff)
-#define vui_color_asbestos VuiColor_init(0x7f, 0x8c, 0x8d, 0xff)
-#define vui_color_wet_asphalt VuiColor_init(0x34, 0x49, 0x5e, 0xff)
-#define vui_color_midnight_blue VuiColor_init(0x2c, 0x3e, 0x50, 0xff)
-
-#define vui_default_font (VuiFont) { .line_height = 18.0, .user_id = 0, }
-
-VuiCtrlStyle ctrl_style = { vui_default_margin, vui_default_padding };
-
-VuiTextStyle section_text_style = {
-	.ctrl = { vui_default_margin, vui_default_padding },
-	.color = vui_color_white,
-	.font = { .user_id = 0, .line_height = 32 },
-};
-
-VuiTextButtonStyle green_text_button_style = {
-	.button = {
-		.ctrl = { vui_default_margin, vui_default_padding },
-		.radius = 1.0,
-		.border_width = 3.0,
-		.inactive_bg_color = vui_color_nephritis,
-		.inactive_border_color = vui_color_asbestos,
-		.focused_bg_color = vui_color_emerald,
-		.focused_border_color = vui_color_concrete,
-		.pressed_bg_color = vui_color_concrete,
-		.pressed_border_color = vui_color_emerald,
-	},
-	.inactive_color = vui_color_white,
-	.focused_color = vui_color_white,
-	.pressed_color = vui_color_black,
-	.font = { .user_id = 0, .line_height = 32 },
-};
-
-VuiTextButtonStyle red_text_button_style = {
-	.button = {
-		.ctrl = { vui_default_margin, vui_default_padding },
-		.radius = 1.0,
-		.border_width = 3.0,
-		.inactive_bg_color = vui_color_pomegranate,
-		.inactive_border_color = vui_color_asbestos,
-		.focused_bg_color = vui_color_alizarin,
-		.focused_border_color = vui_color_concrete,
-		.pressed_bg_color = vui_color_concrete,
-		.pressed_border_color = vui_color_alizarin,
-	},
-	.inactive_color = vui_color_white,
-	.focused_color = vui_color_white,
-	.pressed_color = vui_color_black,
-	.font = { .user_id = 0, .line_height = 32 },
-};
-
-VuiSeparatorStyle seperator_style = {
-	.ctrl = { vui_default_margin, vui_default_padding },
-	.color = vui_color_asbestos,
-	.width = 4,
-	.radius = 10.0,
-};
-
-VuiTextBoxStyle text_box_style = {
-	.ctrl = { vui_default_margin, VuiThickness_init_even(4.0) },
-	.radius = 1.0,
-	.border_width = 3.0,
-	.inactive_bg_color = vui_color_midnight_blue,
-	.inactive_border_color = vui_color_wisteria,
-	.focused_bg_color = vui_color_midnight_blue,
-	.focused_border_color = vui_color_amethyst,
-	.text_color = vui_color_white,
-	.text_font = { .user_id = 0, .line_height = 32 },
-	.selection_color = VuiColor_init(0x20, 0xac, 0xec, 0x88),
-	.selection_radius = 1.0,
-	.cursor_color = vui_color_amethyst,
-	.cursor_width = 2.0,
-	.cursor_radius = 1.0,
-};
-
-VuiTextCheckBoxStyle text_check_box_style = {
-	.check_box = {
-		.ctrl = { vui_default_margin, VuiThickness_init_even(4.0) },
-		.radius = 2.0,
-		.border_width = 2.0,
-		.inactive_bg_color = vui_color_midnight_blue,
-		.inactive_border_color = vui_color_wisteria,
-		.focused_bg_color = vui_color_midnight_blue,
-		.focused_border_color = vui_color_amethyst,
-		.checked_color = vui_color_amethyst,
-		.size = 24,
-	},
-	.color = vui_color_white,
-	.font = { .user_id = 0, .line_height = 32 },
-};
-
-VuiTextRadioButtonStyle text_radio_button_style = {
-	.radio_button = {
-		.ctrl = { vui_default_margin, VuiThickness_init_even(2) },
-		.border_width = 2.0,
-		.inactive_bg_color = vui_color_midnight_blue,
-		.inactive_border_color = vui_color_green_sea,
-		.focused_bg_color = vui_color_midnight_blue,
-		.focused_border_color = vui_color_turquoise,
-		.selected_color = vui_color_turquoise,
-		.size = 24,
-		.selected_size = 12,
-	},
-	.color = vui_color_white,
-	.font = { .user_id = 0, .line_height = 32 },
-};
-
-VuiProgressBarStyle progress_bar_style = {
-	.box = {
-		.ctrl = { vui_default_margin, VuiThickness_init_even(4) },
-		.bg_color = vui_color_pumpkin,
-		.border = { .color = vui_color_asbestos, .width = 4.0 },
-		.radius = 4.0,
-	},
-	.bar_color = vui_color_sun_flower,
-};
-
-VuiScrollViewStyle scroll_view_style = {
-	.box = {
-		.ctrl = { vui_default_margin, vui_default_padding },
-		.bg_color = VuiColor_transparent,
-		.border = { .color = vui_color_asbestos, .width = 1.0 },
-		.radius = 1.0,
-	},
-	.scroll_bar = {
-		.box = {
-			.ctrl = {0},
-			.bg_color = vui_color_midnight_blue,
-			.border = { .color = vui_color_wet_asphalt, .width = 2.0 },
-			.radius = 1.0,
-		},
-		.width = 20.0,
-		.slider = {
-			.ctrl = { vui_default_margin, vui_default_padding },
-			.radius = 1.0,
-			.border_width = 3.0,
-			.inactive_bg_color = vui_color_carrot,
-			.inactive_border_color = vui_color_pumpkin,
-			.focused_bg_color = vui_color_orange,
-			.focused_border_color = vui_color_carrot,
-			.pressed_bg_color = vui_color_sun_flower,
-			.pressed_border_color = vui_color_orange,
-		},
-	}
-};
-
 typedef struct {
 	stbtt_fontinfo* info;
-	DasStk(int32_t) codepts;
+	VuiStk(int32_t) codepts;
 	stbtt_packedchar* codepts_packed_chars;
 	uint32_t codepts_packed_chars_cap;
 	float scale;
@@ -214,35 +39,42 @@ void ScaledFont_init(ScaledFont* font, stbtt_fontinfo* info, float pixel_height)
 }
 
 void ScaledFont_clear_codepts(ScaledFont* f) {
-	f->codepts.count = 0;
+	VuiStk_clear(f->codepts);
 }
 
 void ScaledFont_add_codept(ScaledFont* f, int32_t codept) {
-	int32_t* codepts = f->codepts.DasStk_data;
-	for (uint32_t i = 0; i < f->codepts.count; i += 1) {
+	int32_t* codepts = f->codepts;
+	for (uint32_t i = 0; i < VuiStk_count(f->codepts); i += 1) {
 		if (codepts[i] == codept) return;
 	}
 
-	DasStk_push(&f->codepts, &codept);
+	int32_t* t = VuiStk_push(&f->codepts);
+	*t = codept;
 }
 
 VuiBool ScaledFont_pack_codepts(ScaledFont* f, stbtt_pack_context* spc) {
-	if (f->codepts_packed_chars_cap != f->codepts.cap) {
-		f->codepts_packed_chars = das_realloc_array(f->codepts_packed_chars, f->codepts_packed_chars_cap, f->codepts.cap);
+	if (f->codepts_packed_chars_cap != VuiStk_cap(f->codepts)) {
+		f->codepts_packed_chars = vui_mem_realloc_array(
+			stbtt_packedchar,
+			_vui.allocator,
+			f->codepts_packed_chars,
+			f->codepts_packed_chars_cap,
+			VuiStk_cap(f->codepts)
+		);
 	}
 
 	stbtt_pack_range r = {0};
 	r.font_size = 32;
 	r.chardata_for_range = f->codepts_packed_chars;
-	r.num_chars = f->codepts.count;
-	r.array_of_unicode_codepoints = f->codepts.DasStk_data;
+	r.num_chars = VuiStk_count(f->codepts);
+	r.array_of_unicode_codepoints = f->codepts;
 
 	return stbtt_PackFontRanges(spc, f->info->data, 0, &r, 1) == 1;
 }
 
 uint32_t ScaledFont_get_codept_idx(ScaledFont* f, int32_t codept) {
-	int32_t* codepts = f->codepts.DasStk_data;
-	for (uint32_t i = 0; i < f->codepts.count; i += 1) {
+	int32_t* codepts = f->codepts;
+	for (uint32_t i = 0; i < VuiStk_count(f->codepts); i += 1) {
 		if (codepts[i] == codept) return i;
 	}
 
@@ -303,203 +135,27 @@ void update_glyph_texture() {
 	stbtt_PackEnd(&pack_ctx);
 }
 
-char* control_texts[] = {"here", "are", "some", "text", "controls"};
-VuiRect image_uv_rects[] = {
-	VuiRect_init(0, 0, 1, 1),
-	VuiRect_init(1, 1, 0, 0),
-	VuiRect_init(0, 0, 0.5, 0.5),
-	VuiRect_init(1, 0, 0, 1),
-	VuiRect_init(0.5, 0.5, 1, 1),
-};
-
 void build_ui() {
 	ScaledFont_clear_codepts(&liberation_sans_32px);
 	ScaledFont_clear_codepts(&liberation_mono_32px);
 
 	vui_frame_start();
-
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 
-	static VuiVec2 sv_size = VuiVec2_fill;
-	static VuiVec2 sv_content_offset = VuiVec2_zero;
-	vui_scroll_view_start(1, &sv_size, &sv_content_offset, VuiScrollViewFlags_vertical_scroll | VuiScrollViewFlags_always_show_horizontal_bar | VuiScrollViewFlags_resizable, &scroll_view_style);
+	vui_stack_layout();
 
-	VuiCtrlId start_id = 22;
-	vui_row_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-	{
-		static DasStk(char) text_box_string_a = {0};
-		static DasStk(char) text_box_string_b = {0};
-		vui_text_box(1203, 200, &text_box_string_a, &text_box_style);
-		vui_text_box(1204, 200, &text_box_string_b, &text_box_style);
+	vui_scope_box(vui_sib_id) {
+		vui_column_layout();
 
-		vui_text("Buttons", 0, &section_text_style);
+		VuiFocusState state = vui_text_button(vui_sib_id, "test");
+		//printf("state = %u\n", state);
 
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(control_texts) / sizeof(*control_texts); i += 1) {
-			if (vui_text_button(start_id + i, control_texts[i], &green_text_button_style)) {
-				printf("Buttons.%s has been pressed\n", control_texts[i]);
-			}
+		vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4)) {
+			vui_text_button(vui_sib_id, "test");
 		}
-		start_id += sizeof(control_texts) / sizeof(*control_texts);
 
-		vui_column_layout_end();
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(image_uv_rects) / sizeof(*image_uv_rects); i += 1) {
-			if (vui_image_button(start_id + i, VuiVec2_init(100, 50), 1, image_uv_rects[i], VuiColor_white, &green_text_button_style.button)) {
-				printf("Buttons.image has been pressed\n");
-			}
-		}
-		start_id += sizeof(image_uv_rects) / sizeof(*image_uv_rects);
-
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
+		vui_text_button(vui_sib_id, "test");
 	}
-
-	{
-		vui_text("Toggle_buttons", 0, &section_text_style);
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		static VuiBool text_state[sizeof(control_texts) / sizeof(*control_texts)] = {0};
-
-		for (int i = 0; i < sizeof(control_texts) / sizeof(*control_texts); i += 1) {
-			if (vui_text_toggle_button(start_id + i, &text_state[i], control_texts[i], &red_text_button_style)) {
-				printf("Toggle_Buttons.%s is selected\n", control_texts[i]);
-			}
-		}
-		start_id += sizeof(control_texts) / sizeof(*control_texts);
-
-		vui_column_layout_end();
-
-		static VuiBool image_state[sizeof(image_uv_rects) / sizeof(*image_uv_rects)] = {0};
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(image_uv_rects) / sizeof(*image_uv_rects); i += 1) {
-			if (vui_image_toggle_button(start_id + i, &image_state[i], VuiVec2_init(100, 50), 1, image_uv_rects[i], VuiColor_white, &red_text_button_style.button)) {
-				printf("Toggle_Buttons.image is selected\n");
-			}
-		}
-		start_id += sizeof(image_uv_rects) / sizeof(*image_uv_rects);
-
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
-	}
-
-	{
-		vui_text("Select_buttons", 0, &section_text_style);
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		static VuiCtrlId selected_button_id = 0;
-		for (int i = 0; i < sizeof(control_texts) / sizeof(*control_texts); i += 1) {
-			if (vui_text_select_button(start_id + i, &selected_button_id, control_texts[i], &red_text_button_style)) {
-				printf("Select_Buttons.%s is selected\n", control_texts[i]);
-			}
-		}
-		start_id += sizeof(control_texts) / sizeof(*control_texts);
-
-		vui_column_layout_end();
-
-		static VuiBool image_state[sizeof(image_uv_rects) / sizeof(*image_uv_rects)] = {0};
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(image_uv_rects) / sizeof(*image_uv_rects); i += 1) {
-			if (vui_image_select_button(start_id + i, &selected_button_id, VuiVec2_init(100, 50), 1, image_uv_rects[i], VuiColor_white, &red_text_button_style.button)) {
-				printf("Select_Buttons.image is selected\n");
-			}
-		}
-		start_id += sizeof(image_uv_rects) / sizeof(*image_uv_rects);
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
-	}
-
-	{
-		vui_text("Check_Boxes", 0, &section_text_style);
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		static VuiBool text_state[sizeof(control_texts) / sizeof(*control_texts)] = {0};
-
-		for (int i = 0; i < sizeof(control_texts) / sizeof(*control_texts); i += 1) {
-			if (vui_text_check_box(start_id + i, &text_state[i], control_texts[i], &text_check_box_style)) {
-				printf("Check_Boxes.%s is selected\n", control_texts[i]);
-			}
-		}
-		start_id += sizeof(control_texts) / sizeof(*control_texts);
-
-		vui_column_layout_end();
-
-		static VuiBool image_state[sizeof(image_uv_rects) / sizeof(*image_uv_rects)] = {0};
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(image_uv_rects) / sizeof(*image_uv_rects); i += 1) {
-			if (vui_image_check_box(start_id + i, &image_state[i], VuiVec2_init(100, 50), 1, image_uv_rects[i], VuiColor_white, &text_check_box_style.check_box)) {
-				printf("Check_Boxes.image is selected\n");
-			}
-		}
-		start_id += sizeof(image_uv_rects) / sizeof(*image_uv_rects);
-
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
-	}
-
-	{
-		vui_text("Radio_Buttons", 0, &section_text_style);
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		static VuiCtrlId selected_button_id = 0;
-		for (int i = 0; i < sizeof(control_texts) / sizeof(*control_texts); i += 1) {
-			if (vui_text_radio_button(start_id + i, &selected_button_id, control_texts[i], &text_radio_button_style)) {
-				printf("Radio_Buttons.%s is selected\n", control_texts[i]);
-			}
-		}
-		start_id += sizeof(control_texts) / sizeof(*control_texts);
-
-		vui_column_layout_end();
-
-		static VuiBool image_state[sizeof(image_uv_rects) / sizeof(*image_uv_rects)] = {0};
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-
-		for (int i = 0; i < sizeof(image_uv_rects) / sizeof(*image_uv_rects); i += 1) {
-			if (vui_image_radio_button(start_id + i, &selected_button_id, VuiVec2_init(100, 50), 1, image_uv_rects[i], VuiColor_white, &text_radio_button_style.radio_button)) {
-				printf("Radio_Buttons.image is selected\n");
-			}
-		}
-		start_id += sizeof(image_uv_rects) / sizeof(*image_uv_rects);
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
-	}
-
-	{
-		vui_text("Progress_Bars", 0, &section_text_style);
-
-		vui_column_layout_start(0, VuiVec2_init(vui_auto_len, vui_auto_len), &VuiRowColumnLayoutStyle_zero);
-		static VuiBool update_value = vui_false;
-		static float value = 0.f;
-		static VuiBool inc_value = vui_true;
-		vui_progress_bar(VuiVec2_init(200, 40), value, 0, 100, &progress_bar_style);
-
-		if (vui_text_toggle_button(1239, &update_value, "update", &red_text_button_style)) {
-			if (inc_value) value += 0.5;
-			else value -= 0.5;
-			if (value > 100 || value < 0) inc_value = !inc_value;
-		}
-		vui_column_layout_end();
-
-		vui_separator(&seperator_style);
-	}
-
-	vui_row_layout_end();
-	vui_scroll_view_end();
 
 	vui_window_end();
 
@@ -563,34 +219,37 @@ struct OpenGLRenderState {
 
 OpenGLRenderState render_state = {0};
 
+typedef enum {
+	WindowId_main,
+	WindowId_COUNT,
+} WindowId;
+
 void render_ui() {
 	static uint64_t prev_hash = 0;
-	VuiRenderWindow* w = vui_window_build_render(0, 1.0, vui_false);
+	VuiWindowRender* w = vui_window_render(WindowId_main, 1.0, vui_false);
 	/*
 	vui_window_dump_render(0, stdout);
 	exit(0);
 	*/
 	if (w->hash == prev_hash) return;
 
-	VuiRenderLayer* l = &w->layers.DasStk_data[0];
-
 	glBindBuffer(GL_ARRAY_BUFFER, render_state.vbo);
-	glBufferData(GL_ARRAY_BUFFER, l->verts.count * sizeof(VuiRenderVert), l->verts.DasStk_data, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, VuiStk_count(w->verts) * sizeof(VuiVertex), w->verts, GL_DYNAMIC_DRAW);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, l->indices.count * sizeof(VuiRenderIdx), l->indices.DasStk_data, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, VuiStk_count(w->indices) * sizeof(VuiVertexIdx), w->indices, GL_DYNAMIC_DRAW);
 
 	glUniformMatrix4fv(glGetUniformLocation(render_state.program, "u_mvp"), 1, GL_FALSE, render_state.projection);
 
 	GLenum index_type = 0;
-	switch (sizeof(VuiRenderIdx)) {
+	switch (sizeof(VuiVertexIdx)) {
 		case sizeof(uint8_t): index_type = GL_UNSIGNED_BYTE; break;
 		case sizeof(uint16_t): index_type = GL_UNSIGNED_SHORT; break;
 		case sizeof(uint32_t): index_type = GL_UNSIGNED_INT; break;
 	}
 
-	VuiRenderCmd* cmds = l->cmds.DasStk_data;
-	for (int i = 0; i < l->cmds.count; i += 1) {
+	VuiRenderCmd* cmds = w->cmds;
+	for (int i = 0; i < VuiStk_count(w->cmds); i += 1) {
 		VuiRenderCmd* c = &cmds[i];
 		GLuint tex = 0;
 		switch (c->texture_id) {
@@ -600,7 +259,7 @@ void render_ui() {
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, tex);
-		glDrawElements(GL_TRIANGLES, c->indices_count, index_type, (void*)((uintptr_t)c->indices_start_idx * sizeof(VuiRenderIdx)));
+		glDrawElements(GL_TRIANGLES, c->indices_count, index_type, (void*)((uintptr_t)c->indices_start_idx * sizeof(VuiVertexIdx)));
 	}
 }
 
@@ -611,7 +270,7 @@ uint8_t* read_font_from_disk(char* path) {
 	long size = ftell(f);
 	fseek(f, 0, SEEK_SET);
 
-	uint8_t* font_data = das_alloc_array(uint8_t, size);
+	uint8_t* font_data = vui_mem_alloc_array(uint8_t, _vui.allocator, size);
 
 	fread(font_data, size, 1, f);
 	fclose(f);
@@ -643,13 +302,13 @@ uint32_t utf8codepoint(char* str, int32_t* out_codepoint) {
 	return bytes;
 }
 
-VuiVec2 position_text(void* userdata, VuiUserFontId user_font_id, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
+VuiVec2 position_text(void* userdata, VuiFontId font_id, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
 	if (text_length == 0) { return VuiVec2_zero; }
 	ScaledFont* font = {0};
-	switch (user_font_id) {
+	switch (font_id) {
 		case 0: font = &liberation_sans_32px; break;
 		case 1: font = &liberation_mono_32px; break;
-		default: printf("unreconginsed user_font_id %u\n", user_font_id); exit(1);
+		default: printf("unreconginsed font_id %u\n", font_id); exit(1);
 	}
 
 	int ascent, descent, line_gap;
@@ -673,11 +332,9 @@ VuiVec2 position_text(void* userdata, VuiUserFontId user_font_id, char* text, ui
 			stbtt_aligned_quad quad = {0};
 			stbtt_GetPackedQuad(font->codepts_packed_chars, glyph_texture.width, glyph_texture.height,
 				codept_idx, &pos.x, &pos.y, &quad, 1);
-			render_glyph_fn(
-				0,
-				VuiRect_init(quad.x0, quad.y0, quad.x1, quad.y1),
-				VuiRect_init(quad.s0, quad.t0, quad.s1, quad.t1)
-			);
+			VuiRect rect = VuiRect_init(quad.x0, quad.y0, quad.x1, quad.y1);
+			VuiRect uv_rect = VuiRect_init(quad.s0, quad.t0, quad.s1, quad.t1);
+			render_glyph_fn(&rect, 0, &uv_rect);
 		} else {
 			ScaledFont_add_codept(font, codept);
 
@@ -784,9 +441,9 @@ void opengl_gen_vao_vbos() {
 	glEnableVertexAttribArray(1);
 	glEnableVertexAttribArray(2);
 
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(VuiRenderVert), (const void*)offsetof(VuiRenderVert, pos));
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(VuiRenderVert), (const void*)offsetof(VuiRenderVert, uv));
-	glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VuiRenderVert), (const void*)offsetof(VuiRenderVert, color));
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, pos));
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, uv));
+	glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, color));
 
 	glGenBuffers(1, &render_state.ibo);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.ibo);
@@ -916,11 +573,14 @@ int main(int argc, char** argv) {
 	render_state.tex_glyph = opengl_gen_texture();
 	render_state.tex_image = opengl_gen_texture();
 
+	VuiStyle style;
+	VuiStyle_init_default(&style);
 	VuiSetup setup = {
 		.position_text_fn = position_text,
 		.position_text_userdata = NULL,
 		.text_box_focus_change_fn = vui_text_box_focus_change,
 		.windows_count = 1,
+		.style = &style,
 	};
 	vui_assert(vui_init(&setup), "failed to initialize vui");
 
