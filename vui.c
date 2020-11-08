@@ -762,11 +762,13 @@ void vui_ctrl_set_focused(VuiCtrlId ctrl_id) {
 	}
 
 	//
-	// now set the focus to the control that was requested
-	VuiCtrl* ctrl = vui_ctrl_get(ctrl_id);
-	ctrl->state_flags |= VuiCtrlStateFlags_focused;
-	w->focused_ctrl_id = ctrl_id;
+	// if a control was supplied, then set it to be focus.
+	if (ctrl_id) {
+		VuiCtrl* ctrl = vui_ctrl_get(ctrl_id);
+		ctrl->state_flags |= VuiCtrlStateFlags_focused;
+	}
 
+	w->focused_ctrl_id = ctrl_id;
 	if (_vui.input.focused_text_box.string) {
 		_vui.text_box_focus_change_fn(vui_false);
 		_vui.input.focused_text_box.string = NULL;
@@ -783,9 +785,12 @@ void _vui_ctrl_set_mouse_focused(VuiCtrlId ctrl_id) {
 	}
 
 	//
-	// now set the focus to the control that was requested
-	VuiCtrl* ctrl = vui_ctrl_get(ctrl_id);
-	ctrl->state_flags |= VuiCtrlStateFlags_mouse_focused;
+	// if a control was supplied, make that the new mouse focused control
+	if (ctrl_id) {
+		VuiCtrl* ctrl = vui_ctrl_get(ctrl_id);
+		ctrl->state_flags |= VuiCtrlStateFlags_mouse_focused;
+	}
+
 	_vui.mouse_focused_ctrl_id = ctrl_id;
 }
 
@@ -1217,8 +1222,8 @@ uint32_t vui_calc_circle_segments_count(float radius) {
 }
 
 void vui_path_plot_rect(const VuiRect* rect, float radius) {
-	float w = vui_max(VuiRect_width(*rect), 0.f) / 2.f;
-	float h = vui_max(VuiRect_height(*rect), 0.f) / 2.f;
+	float w = vui_max(VuiRect_width(rect), 0.f) / 2.f;
+	float h = vui_max(VuiRect_height(rect), 0.f) / 2.f;
 	radius = vui_min(radius, vui_min(w, h));
 
 	if (radius == 0.f) {
@@ -1509,7 +1514,6 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 	//
 	// copy over the attributes.
 	//
-	VuiCtrlAttrValue* attrs_dst = ctrl->attributes;
 	for (VuiCtrlAttr attr = 0; attr < VuiCtrlAttr_COUNT; attr += 1) {
 		ctrl->attributes[attr] = *_VuiCtrl_style_attr(ctrl, attr);
 	}
@@ -2205,8 +2209,8 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 void vui_frame_start() {
 	vui_assert(_vui.build.w == NULL, "cannot call vui_frame_start until vui_window_end has been called");
 
-	_vui.mouse_focused_ctrl_id = 0;
-	_vui.mouse_scroll_focused_ctrl_id = 0;
+	_vui_ctrl_set_mouse_focused(0);
+	_vui_ctrl_set_mouse_scroll_focused(0);
 	_vui.input.is_mouse_over_ctrl = vui_false;
 
 	_VuiWindow* windows = _vui.windows;
@@ -2457,8 +2461,15 @@ void vui_window_start(VuiWindowId id, VuiVec2 size) {
 		w->root_ctrl_id = id;
 	}
 
+	//
+	// copy over the attributes.
+	//
+	for (VuiCtrlAttr attr = 0; attr < VuiCtrlAttr_COUNT; attr += 1) {
+		root_ctrl->attributes[attr] = *_VuiCtrl_style_attr(root_ctrl, attr);
+	}
 	root_ctrl->attributes[VuiCtrlAttr_width].float_ = size.x;
 	root_ctrl->attributes[VuiCtrlAttr_height].float_ = size.y;
+
 	_vui.build.parent_ctrl_id = root_ctrl->id;
 	_vui.build.sibling_prev_ctrl_id = 0;
 }
@@ -2489,6 +2500,224 @@ VuiColumn // 500
 			VuiImage // finite
 			VuiText // auto
 			*/
+typedef uint8_t _VuiLayoutColumnRow;
+enum {
+	_VuiLayoutColumnRow_column,
+	_VuiLayoutColumnRow_column_right_to_left,
+	_VuiLayoutColumnRow_row,
+	_VuiLayoutColumnRow_row_right_to_left,
+};
+
+void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inner_width, float parent_inner_height);
+
+void _vui_layout_column_row(
+	VuiCtrl* ctrl, _VuiLayoutColumnRow type, float inner_x, float inner_y, float inner_width, float inner_height,
+	VuiVec2* max_inner_right_bottom_ptr, VuiRect* child_placement_area_ptr
+) {
+	VuiCtrlAttr dir_attr = 0;
+	VuiCtrlAttr wrap_dir_attr = 0;
+	float (*dir_rect_len)(const VuiRect*) = NULL;
+	float (*wrap_dir_rect_len)(const VuiRect*) = NULL;
+	float inner_dir_offset = 0.f;
+	float inner_wrap_dir_offset = 0.f;
+	float inner_dir_len = 0.f;
+	float inner_wrap_dir_len = 0.f;
+	float* fill_portion_dir_len_ptr = NULL;
+	float* fill_portion_wrap_dir_len_ptr = NULL;
+	float* max_dir_inner_len_ptr = NULL;
+	float* max_wrap_dir_inner_len_ptr = NULL;
+	switch (type) {
+		case _VuiLayoutColumnRow_column:
+		case _VuiLayoutColumnRow_column_right_to_left:
+			inner_dir_offset = inner_x;
+			inner_wrap_dir_offset = inner_y;
+			inner_dir_len = inner_width;
+			inner_wrap_dir_len = inner_height;
+			dir_attr = VuiCtrlAttr_width;
+			wrap_dir_attr = VuiCtrlAttr_height;
+			dir_rect_len = VuiRect_width;
+			wrap_dir_rect_len = VuiRect_height;
+			fill_portion_dir_len_ptr = &_vui.build.fill_portion_width;
+			fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_height;
+			max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
+			max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
+			break;
+		case _VuiLayoutColumnRow_row:
+		case _VuiLayoutColumnRow_row_right_to_left:
+			inner_dir_offset = inner_y;
+			inner_wrap_dir_offset = inner_x;
+			inner_dir_len = inner_height;
+			inner_wrap_dir_len = inner_width;
+			dir_attr = VuiCtrlAttr_height;
+			wrap_dir_attr = VuiCtrlAttr_width;
+			dir_rect_len = VuiRect_height;
+			wrap_dir_rect_len = VuiRect_width;
+			fill_portion_dir_len_ptr = &_vui.build.fill_portion_height;
+			fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_width;
+			max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
+			max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
+			break;
+	}
+
+	//
+	// only allow wrap if this layout does not have an automatic lenght in the direction of the layout.
+	float wrap_spacing = 0.f;
+	VuiBool wrap = vui_false;
+	if (inner_dir_len != vui_auto_len) {
+		wrap_spacing = ctrl->attributes[VuiCtrlAttr_layout_wrap_spacing].float_;
+		wrap = ctrl->attributes[VuiCtrlAttr_layout_wrap].bool_;
+	}
+
+	//
+	// work out the fill_portion_dir_len.
+	// this is only available for a non wrapping layouts with a fixed length.
+	if (!wrap && inner_dir_len != vui_auto_len) {
+		//
+		// determine all the sizes of the automatic lengths in the direction of the layout
+		float total_auto_dir_lens = 0.f;
+		*child_placement_area_ptr = VuiRect_init_wh(inner_x, inner_y, 0, 0);
+		VuiCtrl* child = NULL;
+		for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
+			child = vui_ctrl_get(child_id);
+			if (child->attributes[dir_attr].float_ == vui_auto_len) {
+				_vui_layout_ctrls(child, child_placement_area_ptr, inner_dir_len, inner_wrap_dir_len);
+				total_auto_dir_lens += dir_rect_len(&child->rect);
+			}
+		}
+
+		//
+		// now go over the children and remove the ratios
+		// from the available_dir_len and count up how many
+		// controls want to fill the available space
+		//
+		float available_dir_len = inner_dir_len - total_auto_dir_lens;
+		uint32_t fill_ctrls_count = 0;
+		for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
+			child = vui_ctrl_get(child_id);
+			float child_dir_len = child->attributes[dir_attr].float_;
+			if (child_dir_len < 0) { // is ratio
+				// remove the ratio from the available_dir_len
+				float ratio = -child_dir_len;
+				available_dir_len -= inner_dir_len * ratio;
+			} else if (child_dir_len == vui_fill_len) {
+				fill_ctrls_count += 1;
+			}
+		}
+
+		//
+		// we now have the portion length that children with a length (in the direction of the layout) of vui_fill_len can use
+		//
+		if (available_dir_len > 0.f && fill_ctrls_count) {
+			*fill_portion_dir_len_ptr = available_dir_len / fill_ctrls_count;
+		}
+	}
+
+	//
+	// now begin laying out the children in the layout
+	//
+	float dir_start = inner_dir_offset;
+	float wrap_dir_start = inner_wrap_dir_offset;
+	VuiCtrl* child = vui_ctrl_get(ctrl->child_first_id);
+
+	// layouts with wrap or an automatic length in the direction of the layout.
+	// cannot get have children with vui_fill_len or ratio.
+	// these variable stop the child controls from filling and using ratio.
+	// they will be converted to vui_auto_len when _vui_layout_ctrls.
+	float layout_inner_width = inner_width;
+	if (wrap && (type == _VuiLayoutColumnRow_column || type == _VuiLayoutColumnRow_column_right_to_left)) {
+		layout_inner_width = vui_auto_len;
+	}
+	float layout_inner_height = inner_height;
+	if (wrap && (type == _VuiLayoutColumnRow_row || type == _VuiLayoutColumnRow_row_right_to_left)) {
+		layout_inner_height = vui_auto_len;
+	}
+
+	float layout_spacing = ctrl->attributes[VuiCtrlAttr_layout_spacing].float_;
+	while (child) {
+		VuiCtrl* child_line_start = child;
+		*fill_portion_wrap_dir_len_ptr = 0.f;
+		//
+		// loop until we have reached the end of the line and find the tallest control.
+		float max_wrap_dir_len = 0.0;
+		float end_dir_coord = 0.f;
+		VuiBool is_first = vui_true;
+		*child_placement_area_ptr = VuiRect_init_wh(dir_start, wrap_dir_start, 0, 0);
+		for (; child; child = child->sibling_next_id ? vui_ctrl_get(child->sibling_next_id) : NULL) {
+			_vui_layout_ctrls(child, child_placement_area_ptr, layout_inner_width, layout_inner_height);
+
+			// advance the length along the direction of the layout
+			end_dir_coord += dir_rect_len(&child->rect);
+
+			//
+			// wrap the control back around if it exceeds the wrap length.
+			if (wrap && !is_first && inner_dir_len < end_dir_coord) {
+				break;
+			}
+			is_first = vui_false;
+
+			end_dir_coord += layout_spacing;
+
+			// see if the height for this control is the tallest
+			float child_wrap_dir_len = wrap_dir_rect_len(&child->rect);
+			if (child_wrap_dir_len > max_wrap_dir_len) {
+				max_wrap_dir_len = child_wrap_dir_len;
+			}
+		}
+
+		*fill_portion_wrap_dir_len_ptr = max_wrap_dir_len;
+
+		//
+		// go back over controls in this line and lay them out properly this time.
+		// setup the placement area for the child in a layout direction agnostic way.
+		float line_inner_width = layout_inner_width;
+		float line_inner_height = layout_inner_height;
+		float* child_placement_area_dir_len_start = NULL;
+		float* child_placement_area_dir_len_end = NULL;
+		switch (type) {
+			case _VuiLayoutColumnRow_column:
+			case _VuiLayoutColumnRow_column_right_to_left:
+				line_inner_height = max_wrap_dir_len;
+				child_placement_area_ptr->left = dir_start;
+				child_placement_area_ptr->top = wrap_dir_start;
+				child_placement_area_ptr->bottom = wrap_dir_start + max_wrap_dir_len;
+				child_placement_area_dir_len_start = &child_placement_area_ptr->left;
+				child_placement_area_dir_len_end = &child_placement_area_ptr->right;
+				break;
+			case _VuiLayoutColumnRow_row:
+			case _VuiLayoutColumnRow_row_right_to_left:
+				line_inner_width = max_wrap_dir_len;
+				child_placement_area_ptr->left = wrap_dir_start;
+				child_placement_area_ptr->right = wrap_dir_start + max_wrap_dir_len;
+				child_placement_area_ptr->top = dir_start;
+				child_placement_area_dir_len_start = &child_placement_area_ptr->top;
+				child_placement_area_dir_len_end = &child_placement_area_ptr->bottom;
+				break;
+		}
+
+		for (VuiCtrl* line_child = child_line_start; line_child != child; line_child = line_child->sibling_next_id ? vui_ctrl_get(line_child->sibling_next_id) : NULL) {
+			// so the control can just position itself within it.
+			*child_placement_area_dir_len_end = *child_placement_area_dir_len_start + dir_rect_len(&line_child->rect);
+			_vui_layout_ctrls(line_child, child_placement_area_ptr, line_inner_width, line_inner_height);
+
+			//
+			// advance to the next column
+			*child_placement_area_dir_len_start = *child_placement_area_dir_len_end + layout_spacing;
+		}
+
+		// advance to the new line
+		wrap_dir_start += max_wrap_dir_len;
+		if (wrap) wrap_dir_start += wrap_spacing;
+
+		// track the max bottom right for auto sized columns
+		if (*child_placement_area_dir_len_end > *max_dir_inner_len_ptr) {
+			*max_dir_inner_len_ptr = *child_placement_area_dir_len_end;
+		}
+		*max_wrap_dir_inner_len_ptr = wrap_dir_start;
+	}
+
+	// remove the trailing wrap spacing
+	if (wrap) *max_wrap_dir_inner_len_ptr -= wrap_spacing;
+}
 
 void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inner_width, float parent_inner_height) {
 	const VuiThickness* margin = &ctrl->attributes[VuiCtrlAttr_margin].thickness;
@@ -2532,8 +2761,8 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		}
 
 		if (width != vui_auto_len) {
-			ctrl->rect.right = ctrl->rect.left + width + margin->left + margin->right;
-			inner_width = width - (padding->left + padding->right) - border_width * 2;
+			ctrl->rect.right = ctrl->rect.left + width;
+			inner_width = width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
 		}
 	}
 
@@ -2552,13 +2781,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				height = parent_fill_portion_height;
 			} else if (height < 0) { // is ratio
 				float ratio = -height;
+				printf("parent_inner_height = %f\n", parent_inner_height);
 				height = parent_inner_height * ratio;
 			}
 		}
 
 		if (height != vui_auto_len) {
-			ctrl->rect.bottom = ctrl->rect.top + height + margin->top + margin->bottom;
-			inner_height = height - (padding->top + padding->bottom) - border_width * 2;
+			ctrl->rect.bottom = ctrl->rect.top + height;
+			inner_height = height - (margin->top + margin->bottom) - (padding->top + padding->bottom) - border_width * 2;
 		}
 	}
 
@@ -2570,141 +2800,16 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				child_placement_area = VuiRect_init_wh(inner_x, inner_y, inner_width, inner_height);
 				VuiCtrl* child = vui_ctrl_get(ctrl->child_first_id);
 				_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
-				max_inner_right_bottom.x = inner_x + VuiRect_width(child->rect);
-				max_inner_right_bottom.y = inner_y + VuiRect_height(child->rect);
+				max_inner_right_bottom.x = inner_x + VuiRect_width(&child->rect);
+				max_inner_right_bottom.y = inner_y + VuiRect_height(&child->rect);
 			}
 			break;
 		};
-		case VuiLayoutType_column: {
-			//
-			// only allow wrap if this is not an automatic column
-			float wrap_spacing = 0.f;
-			VuiBool wrap = vui_false;
-			if (inner_width != vui_auto_len) {
-				wrap_spacing = ctrl->attributes[VuiCtrlAttr_layout_wrap_spacing].float_;
-				wrap = ctrl->attributes[VuiCtrlAttr_layout_wrap].bool_;
-			}
-
-			//
-			// work out the fill_portion_width.
-			// this is only available for a non wrapping column with a fixed length.
-			if (!wrap && inner_width != vui_auto_len) {
-				//
-				// determine all the sizes of the automatic widths
-				float total_auto_widths = 0.f;
-				child_placement_area = VuiRect_init_wh(inner_x, inner_y, 0, 0);
-				VuiCtrl* child = NULL;
-				for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
-					child = vui_ctrl_get(child_id);
-					if (child->attributes[VuiCtrlAttr_width].float_ == vui_auto_len) {
-						_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
-						total_auto_widths += VuiRect_width(child->rect);
-					}
-				}
-
-				//
-				// now go over the children and remove the ratios
-				// from the available_width and count up how many
-				// controls want to fill the available space
-				//
-				float available_width = inner_width;
-				uint32_t fill_ctrls_count = 0;
-				for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
-					child = vui_ctrl_get(child_id);
-					float child_width = child->attributes[VuiCtrlAttr_width].float_;
-					if (child_width < 0) { // is ratio
-						// remove the ratio from the available_width
-						float ratio = -child_width;
-						available_width -= inner_width * ratio;
-					} else if (child_width == vui_fill_len) {
-						fill_ctrls_count += 1;
-					}
-				}
-
-				//
-				// we now have the portion length that children with a width of vui_fill_len can use
-				//
-				if (available_width > 0.f && fill_ctrls_count) {
-					_vui.build.fill_portion_width = available_width / fill_ctrls_count;
-				}
-			}
-
-			//
-			// now being laying out the children in a column layout
-			//
-			float end_x = inner_x;
-			float row_start_y = inner_y;
-			VuiCtrl* child = vui_ctrl_get(ctrl->child_first_id);
-			VuiCtrl* child_row_start = child;
-
-			// wrap or auto columns cannot get have children with vui_fill_len or ratio.
-			// these will be converted to vui_auto_len when _vui_layout_ctrls.
-			float row_inner_width = inner_width;
-			if (wrap || inner_width == vui_auto_len) {
-				row_inner_width = vui_auto_len;
-			}
-
-			while (child) {
-				_vui.build.fill_portion_height = 0.f;
-				//
-				// loop until we have reached the end of the row and find the tallest control.
-				float max_row_height = 0.0;
-				child_placement_area = VuiRect_init_wh(inner_x, row_start_y, 0, 0);
-				for (; child; child = child->sibling_next_id ? vui_ctrl_get(child->sibling_next_id) : NULL) {
-					_vui_layout_ctrls(child, &child_placement_area, row_inner_width, inner_height);
-
-					// advance the width
-					end_x += VuiRect_width(child->rect);
-
-					//
-					// wrap the control back around if it exceeds the wrap width.
-					if (wrap && inner_width > end_x - inner_x) {
-						break;
-					}
-
-					// see if the height for this control is the tallest
-					float child_height = VuiRect_height(child->rect);
-					if (child_height > max_row_height) {
-						max_row_height = child_height;
-					}
-				}
-
-				_vui.build.fill_portion_height = max_row_height;
-				//
-				// go back over controls in this row and lay them out properly this time.
-				child_placement_area.left = inner_x;
-				child_placement_area.top = row_start_y;
-				child_placement_area.bottom = row_start_y + max_row_height;
-
-				VuiCtrl* row_child = NULL;
-				for (VuiCtrlId row_child_id = ctrl->child_first_id; row_child_id; row_child_id = row_child->sibling_next_id) {
-					row_child = vui_ctrl_get(row_child_id);
-					// so the control can just position itself within it.
-					child_placement_area.right = child_placement_area.left + VuiRect_width(row_child->rect);
-					_vui_layout_ctrls(row_child, &child_placement_area, row_inner_width, max_row_height);
-
-					//
-					// advance to the next column
-					child_placement_area.left = child_placement_area.right;
-				}
-
-
-				// advance to the new row
-				row_start_y += max_row_height;
-				if (wrap) row_start_y += wrap_spacing;
-
-				// track the max bottom right for auto sized columns
-				if (child_placement_area.right > max_inner_right_bottom.x) {
-					max_inner_right_bottom.x = row_start_y;
-				}
-				max_inner_right_bottom.y = row_start_y;
-			}
-
-			// remove the trailing wrap spacing
-			if (wrap) max_inner_right_bottom.y -= wrap_spacing;
+		case VuiLayoutType_column:
+			_vui_layout_column_row(ctrl, _VuiLayoutColumnRow_column, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
 			break;
-		};
 		case VuiLayoutType_row:
+			_vui_layout_column_row(ctrl, _VuiLayoutColumnRow_row, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
 			break;
 		case VuiLayoutType_stack: {
 			//
@@ -2719,10 +2824,10 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 					child_placement_area = VuiRect_init_wh(inner_x, inner_y, 0, 0);
 					_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
 
-					float width = VuiRect_width(child->rect);
+					float width = VuiRect_width(&child->rect);
 					if (width > max_width) max_width = width;
 
-					float height = VuiRect_height(child->rect);
+					float height = VuiRect_height(&child->rect);
 					if (height > max_height) max_height = height;
 				}
 
@@ -2756,7 +2861,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + margin->right + border_width;
 	}
 	if (inner_height == vui_auto_len) {
-		ctrl->rect.bottom = ctrl->rect.left + max_inner_right_bottom.y + padding->bottom + margin->bottom + border_width;
+		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + padding->bottom + margin->bottom + border_width;
 	}
 
 	//
@@ -2853,7 +2958,8 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 	VuiCtrlFlags flags = ctrl->flags;
 
 	VuiRect parent_clip_rect = _vui.render.clip_rect;
-	_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &ctrl->rect);
+	VuiRect inner_rect = ctrl->rect;
+	_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
 
 	if (flags & VuiCtrlFlags_background) {
 		VuiColor color = ctrl->attributes[VuiCtrlAttr_bg_color].color;
@@ -2866,6 +2972,12 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 		float width = ctrl->attributes[VuiCtrlAttr_border_width].float_;
 		float radius = ctrl->attributes[VuiCtrlAttr_radius].float_;
 		vui_render_rect_border(&ctrl->rect, color, radius, width);
+
+		inner_rect.left += width;
+		inner_rect.top += width;
+		inner_rect.bottom -= width;
+		inner_rect.right -= width;
+		_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
 	}
 
 	if (flags & _VuiCtrlFlags_image) {

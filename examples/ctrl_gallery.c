@@ -143,26 +143,26 @@ void build_ui() {
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 
-	vui_push_width(VuiCtrlState_default, 180.f);
+	vui_push_height(VuiCtrlState_default, 200.f);
 	vui_scope_layout_wrap(VuiCtrlState_default, vui_true)
-	vui_scope_layout_spacing(VuiCtrlState_default, 50.f)
-	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 2.f)
+	vui_scope_layout_spacing(VuiCtrlState_default, 6.f)
+	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 20.f)
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_init_even(4))
-	//vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4))
+	vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4))
 	vui_scope_box(vui_sib_id) {
-	vui_pop_width(VuiCtrlState_default);
-		vui_column_layout();
+	vui_pop_height(VuiCtrlState_default);
+		vui_row_layout();
 
 			VuiFocusState state = vui_text_button(vui_sib_id, "test");
 			printf("state = %u\n", state);
 
-			vui_scope_width(VuiCtrlState_default, vui_fill_len)
+			vui_scope_height(VuiCtrlState_default, vui_fill_len)
+				vui_text_button(vui_sib_id, "tester");
+
+			vui_scope_height_ratio(VuiCtrlState_default, 0.3)
 				vui_text_button(vui_sib_id, "test");
 
-			vui_scope_width_ratio(VuiCtrlState_default, 0.7)
-				vui_text_button(vui_sib_id, "test");
-
-			vui_scope_width(VuiCtrlState_default, vui_fill_len)
+			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "test");
 
 			vui_text_button(vui_sib_id, "test");

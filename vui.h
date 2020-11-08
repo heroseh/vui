@@ -30,9 +30,6 @@
 #define vui_mem_realloc_array(T, allocator, ptr, count, new_count) vui_mem_realloc(allocator, ptr, sizeof(T) * (count), sizeof(T) * (new_count), alignof(T))
 #define vui_mem_dealloc_array(T, allocator, ptr, count) vui_mem_dealloc(allocator, ptr, sizeof(T) * (count), alignof(T))
 
-#define vui_margin_default VuiThickness_init_even(4.0);
-#define vui_padding_default VuiThickness_init_even(4.0);
-
 #ifndef noreturn
 #define noreturn _Noreturn
 #endif
@@ -311,8 +308,8 @@ union VuiVec4 {
 #define VuiRect_left_bottom(rect) VuiVec2_init((rect).left, (rect).bottom)
 #define VuiRect_right_top(rect) VuiVec2_init((rect).right, (rect).top)
 #define VuiRect_size(rect) VuiVec2_init((rect).left + (rect).right, (rect).top + (rect).bottom)
-#define VuiRect_width(rect) ((rect).right - (rect).left)
-#define VuiRect_height(rect) ((rect).bottom - (rect).top)
+static inline float VuiRect_width(const VuiRect* rect) { return rect->right - rect->left; }
+static inline float VuiRect_height(const VuiRect* rect) { return rect->bottom - rect->top; }
 VuiRect VuiRect_clip(const VuiRect* a, const VuiRect* b);
 VuiVec2 VuiRect_clip_pt(const VuiRect* rect, VuiVec2 pt);
 VuiBool VuiRect_intersects(const VuiRect* a, const VuiRect* b);
@@ -326,7 +323,7 @@ typedef uint32_t VuiCtrlSibId;
 
 typedef enum {
     VuiFocusState_none,
-    // signals that the ctrl is mouse focused
+    // signals that the ctrl is mouse or keyboard focused
     VuiFocusState_focused,
     // signals has been pressed this frame
     VuiFocusState_pressed,
