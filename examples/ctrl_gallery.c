@@ -152,7 +152,21 @@ void build_ui() {
 	vui_pop_height(VuiCtrlState_default);
 		vui_row_layout();
 
-			vui_image_text_button(vui_sib_id, app_state.images[2], vui_color_white, "hey look an image");
+			static VuiCtrlSibId selected_sib_id = 0;
+			VuiBool checked_1 = vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], vui_color_white, "button 1");
+			printf("checked_1 = %s\n", checked_1 ? "true" : "false");
+
+			VuiBool checked_2 = vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], vui_color_white, "button 2");
+			printf("checked_2 = %s\n", checked_2 ? "true" : "false");
+
+			VuiBool checked_3 = vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], vui_color_white, "button 3");
+			printf("checked_3 = %s\n", checked_3 ? "true" : "false");
+
+			VuiBool checked_4 = vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], vui_color_white, "button 4");
+			printf("checked_4 = %s\n", checked_4 ? "true" : "false");
+
+			VuiBool checked_5 = vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], vui_color_white, "button 5");
+			printf("checked_5 = %s\n", checked_5 ? "true" : "false");
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "tester");

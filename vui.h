@@ -73,6 +73,10 @@ noreturn void _vui_abort(const char* file, int line, const char* func, char* ass
 
 #define vui_auto_len 0
 #define vui_fill_len INFINITY
+
+//
+// use this macro to get a unique sibling identifier based on the line number.
+// if the function is used to define a new control, then get the identifier to be based in as a parameter.
 #define vui_sib_id __LINE__
 
 static inline float vui_min(float a, float b) { return a < b ? a : b; }
@@ -670,8 +674,9 @@ enum {
 	VuiCtrlFlags_border = 0x8,
 	VuiCtrlFlags_pressable = 0x10,
 	VuiCtrlFlags_toggleable = 0x20,
-	_VuiCtrlFlags_image = 0x40,
-	_VuiCtrlFlags_text = 0x80,
+	VuiCtrlFlags_selectable = 0x40,
+	_VuiCtrlFlags_image = 0x80,
+	_VuiCtrlFlags_text = 0x100,
 };
 
 typedef uint8_t VuiLayoutType;
@@ -847,10 +852,18 @@ void vui_box_start(VuiCtrlSibId sib_id);
 void vui_box_end();
 #define vui_scope_box(sib_id) _vui_defer_loop(vui_box_start(sib_id), vui_box_end())
 
-// wrap_at_width = 0.0 to not have word wrapping
+//
+// @param text: the text to be displayed
+// @param text_length: the length of text in bytes
+// @param wrap_at_width = 0.0 to not have word wrapping
 #define vui_text(sib_id, text, wrap_at_width) vui_text_(sib_id, text, strlen(text), wrap_at_width)
 void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width);
 
+//
+// @param image_id: the image identifier of the image you wish to display in the button
+// @param image_tint: the color to be multiplied with the image pixels.
+//                    can be used to make the image transparent or reduce a certain color channel.
+//                    to show the image unchanged, provide a value of vui_color_white.
 void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
 
 void vui_spacing(VuiCtrlSibId sib_id, float width, float height);
@@ -859,26 +872,40 @@ void vui_separator(VuiCtrlSibId sib_id);
 VuiFocusState vui_button_start(VuiCtrlSibId sib_id);
 void vui_button_end();
 
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+// @param text, text_length: see vui_text
+// @param image_id, image_tint: see vui_image
+//
 #define vui_text_button(sib_id, text) vui_text_button_(sib_id, text, strlen(text))
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length);
 VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
 #define vui_image_text_button(sib_id, image_id, image_tint, text) vui_image_text_button_(sib_id, image_id, image_tint, text, strlen(text))
 VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
 
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+// @param pressed: a pointer to the pressed state of the toggle button.
+//                 use this to change the state external or store the state to be restored at a later time.
+// @param text, text_length: see vui_text
+// @param image_id, image_tint: see vui_image
+//
 VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed);
 void vui_toggle_button_end();
 #define vui_text_toggle_button(sib_id, pressed, text) vui_text_toggle_button_(sib_id, pressed, text, strlen(text))
 VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length);
 VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint);
+#define vui_image_text_toggle_button(sib_id, pressed, image_id, image_tint, text) vui_image_text_toggle_button_(sib_id, pressed, image_id, image_tint, text, strlen(text))
+VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
 
 VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
 void vui_select_button_end();
 #define vui_text_select_button(sib_id, selected_sib_id, text) vui_text_select_button_(sib_id, selected_sib_id, text, strlen(text))
 VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length);
 VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint);
-#define vui_image_text_select_button(sib_id, selected_sib_id, text, image_id, image_tint) \
-	vui_image_text_select_button_(sib_id, selected_sib_id, text, strlen(text), image_id, image_tint)
-VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, VuiImageId image_id, VuiColor image_tint);
+#define vui_image_text_select_button(sib_id, selected_sib_id, image_id, image_tint, text) \
+	vui_image_text_select_button_(sib_id, selected_sib_id, image_id, image_tint, text, strlen(text))
+VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
 
 VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked);
 #define vui_text_check_box(sib_id, checked, text) vui_text_check_box_(sib_id, checked, text, strlen(text))

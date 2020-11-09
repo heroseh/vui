@@ -1541,6 +1541,10 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 			} else {
 				ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 			}
+		} else if (flags & VuiCtrlFlags_selectable) {
+			if (focus_state == VuiFocusState_pressed) {
+				ctrl->state_flags |= VuiCtrlStateFlags_active;
+			}
 		} else if (flags & VuiCtrlFlags_toggleable) {
 			if (focus_state == VuiFocusState_pressed) {
 				ctrl->state_flags ^= VuiCtrlStateFlags_active;
@@ -1707,21 +1711,39 @@ void vui_toggle_button_end() {
 
 VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length) {
 	VuiBool p = vui_toggle_button_start(sib_id, pressed);
-	vui_text_(vui_sib_id, text, text_length, 0.f);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
 	vui_toggle_button_end();
 	return p;
 }
 
 VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint) {
 	VuiBool p = vui_toggle_button_start(sib_id, pressed);
-	vui_image(vui_sib_id, image_id, image_tint);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+	}
+	vui_toggle_button_end();
+	return p;
+}
+
+VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
+	VuiBool p = vui_toggle_button_start(sib_id, pressed);
+	vui_column_layout();
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
 	vui_toggle_button_end();
 	return p;
 }
 
 VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
 	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
+		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
 	vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1736,24 +1758,33 @@ void vui_select_button_end() {
 
 VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length) {
 	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
-	vui_text_(vui_sib_id, text, text_length, 0.f);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
 	vui_select_button_end();
 	return p;
 }
 
 VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint) {
 	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
-	vui_image(vui_sib_id, image_id, image_tint);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+	}
 	vui_select_button_end();
 	return p;
 }
 
-VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, VuiImageId image_id, VuiColor image_tint) {
+VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
 	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
 	vui_column_layout();
 
-	vui_image(vui_sib_id, image_id, image_tint);
-	vui_text_(vui_sib_id, text, text_length, 0.f);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
 
 	vui_select_button_end();
 	return p;
@@ -1762,7 +1793,7 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 
 VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked) {
 	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
+		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
 	vui_ctrl_start(sib_id, flags, checked ? *checked + 1 : 0);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 	VuiBool is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
@@ -1772,7 +1803,7 @@ VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked) {
 }
 
 VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, checked ? *checked + 1 : 0);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1789,7 +1820,7 @@ VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, u
 }
 
 VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, checked ? *checked + 1 : 0);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1807,7 +1838,7 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 
 VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
 	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
+		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
 	vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1817,7 +1848,7 @@ VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
 }
 
 VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, (*selected_sib_id == sib_id) + 1);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1834,7 +1865,7 @@ VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 }
 
 VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, (*selected_sib_id == sib_id) + 1);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
