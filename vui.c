@@ -994,7 +994,7 @@ void vui_render_circle_border(VuiVec2 pos, float radius, VuiColor color, float w
 
 static VuiColor _vui_render_glyph_color = {0};
 void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect) {
-	vui_render_image_(rect, glyph_texture_id, *uv_rect, _vui_render_glyph_color, vui_true);
+	vui_render_image_(rect, 0.f, 0.f, glyph_texture_id, *uv_rect, _vui_render_glyph_color, VuiImageScaleMode_stretch, vui_true);
 }
 
 void vui_render_text(VuiVec2 left_top, VuiFontId font_id, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
@@ -1112,41 +1112,82 @@ void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_a
 
 }
 
-void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint) {
+void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode) {
 	VuiImage* image = vui_image_get(image_id);
-	vui_render_image_(rect, image->texture_id, image->uv_rect, image_tint, vui_false);
+	vui_render_image_(rect, image->width, image->height, image->texture_id, image->uv_rect, image_tint, scale_mode, vui_false);
 }
 
-void vui_render_image_(const VuiRect* rect, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiBool is_glyph) {
+void vui_render_image_(const VuiRect* rect_ptr, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph) {
 	VuiRenderWriter w = vui_render_get_writer(texture_id, 4, 6);
 	vui_ensure_alloc_ok(w.verts);
-	VuiRect clipped_rect = VuiRect_clip(rect, &_vui.render.clip_rect);
 
+	VuiRect rect = *rect_ptr;
+	switch (scale_mode) {
+		case VuiImageScaleMode_stretch:
+			// do nothing, the size of the rectangle will stretch the image by default.
+			break;
+		case VuiImageScaleMode_uniform:
+		case VuiImageScaleMode_uniform_crop: {
+			float width = VuiRect_width(&rect);
+			float height = VuiRect_height(&rect);
+			VuiBool cond = image_width > image_height;
+			if (scale_mode == VuiImageScaleMode_uniform_crop) {
+				cond = !cond;
+			}
+
+			if (cond) {
+				//
+				// width is larger than the height. (unless uniform_crop then this is the opposite way round)
+				// so the width will take up the whole width of the rectangle passed in.
+				// so scale the height of the image to maintain the aspect ratio.
+				float image_aspect_ratio = image_height / image_width;
+				float scale_factor_width = width / image_width;
+				float scale_factor_height = scale_factor_width * image_aspect_ratio;
+				rect.bottom = rect.top + height * scale_factor_height;
+			} else {
+				//
+				// height is larger than the width. (unless uniform_crop then this is the opposite way round)
+				// so the height will take up the whole height of the rectangle passed in.
+				// so scale the width of the image to maintain the aspect ratio.
+				float image_aspect_ratio = image_width / image_height;
+				float scale_factor_height = height / image_height;
+				float scale_factor_width = scale_factor_height * image_aspect_ratio;
+				rect.right = rect.left + width * scale_factor_width;
+			}
+			break;
+		};
+		case VuiImageScaleMode_none:
+			rect.right = rect.left + image_width;
+			rect.bottom = rect.top + image_height;
+			break;
+	}
+
+	VuiRect clipped_rect = VuiRect_clip(&rect, &_vui.render.clip_rect);
 	{
 		//
 		// clip the side of the uv coordiates by the same ratio the rectangle got clipped
-		float width = rect->right_bottom.x - rect->left_top.x;
+		float width = rect.right_bottom.x - rect.left_top.x;
 		float uv_width = uv_rect.right_bottom.x - uv_rect.left_top.x;
 		float w_ratio = uv_width / width;
 
-		float height = rect->right_bottom.y - rect->left_top.y;
+		float height = rect.right_bottom.y - rect.left_top.y;
 		float uv_height = uv_rect.right_bottom.y - uv_rect.left_top.y;
 		float h_ratio = uv_height / height;
 
 		// left
-		float diff = clipped_rect.left_top.x - rect->left_top.x;
+		float diff = clipped_rect.left_top.x - rect.left_top.x;
 		if (diff > 0.0) uv_rect.left_top.x += diff * w_ratio;
 
 		// right
-		diff = rect->right_bottom.x - clipped_rect.right_bottom.x;
+		diff = rect.right_bottom.x - clipped_rect.right_bottom.x;
 		if (diff > 0.0) uv_rect.right_bottom.x -= diff * w_ratio;
 
 		// top
-		diff = clipped_rect.left_top.y - rect->left_top.y;
+		diff = clipped_rect.left_top.y - rect.left_top.y;
 		if (diff > 0.0) uv_rect.left_top.y += diff * h_ratio;
 
 		// bottom
-		diff = rect->right_bottom.y - clipped_rect.right_bottom.y;
+		diff = rect.right_bottom.y - clipped_rect.right_bottom.y;
 		if (diff > 0.0) uv_rect.right_bottom.y -= diff * h_ratio;
 	}
 
@@ -1571,12 +1612,8 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 }
 
 void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint) {
-	VuiImage* image = vui_image_get(image_id);
-
 	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_width(VuiCtrlState_default, image->width)
-	vui_scope_height(VuiCtrlState_default, image->height) {
+	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero) {
 		vui_ctrl_start(sib_id, _VuiCtrlFlags_image, 0);
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 		ctrl->image_id = image_id;
@@ -3052,7 +3089,8 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 	}
 
 	if (flags & _VuiCtrlFlags_image) {
-		vui_render_image(&ctrl->rect, ctrl->image_id, ctrl->image_tint);
+		VuiImageScaleMode scale_mode = ctrl->attributes[VuiCtrlAttr_image_scale_mode].image_scale_mode;
+		vui_render_image(&ctrl->rect, ctrl->image_id, ctrl->image_tint, scale_mode);
 	}
 
 	if (flags & _VuiCtrlFlags_text) {
@@ -3061,6 +3099,13 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 		VuiColor color = ctrl->attributes[VuiCtrlAttr_text_color].color;
 		vui_render_text(ctrl->rect.left_top, font_id, text, ctrl->text_length, color, ctrl->text_wrap_width);
 	}
+
+	const VuiThickness* padding = &ctrl->attributes[VuiCtrlAttr_padding].thickness;
+	inner_rect.left += padding->left;
+	inner_rect.top += padding->top;
+	inner_rect.bottom -= padding->bottom;
+	inner_rect.right -= padding->right;
+	_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
 
 	//
 	// now render the children;

@@ -16,14 +16,6 @@
 #define screen_width 1280
 #define screen_height 720
 
-//
-// =====================================
-//
-// vui styles
-//
-// =====================================
-//
-
 typedef struct {
 	stbtt_fontinfo* info;
 	VuiStk(int32_t) codepts;
@@ -135,6 +127,13 @@ void update_glyph_texture() {
 	stbtt_PackEnd(&pack_ctx);
 }
 
+typedef struct AppState AppState;
+struct AppState {
+	VuiImageId images[4];
+};
+
+AppState app_state;
+
 void build_ui() {
 	ScaledFont_clear_codepts(&liberation_sans_32px);
 	ScaledFont_clear_codepts(&liberation_mono_32px);
@@ -153,44 +152,10 @@ void build_ui() {
 	vui_pop_height(VuiCtrlState_default);
 		vui_row_layout();
 
-			vui_push_width(VuiCtrlState_default, 120.f);
-			vui_push_height(VuiCtrlState_default, 120.f);
-			vui_scope_box(vui_sib_id) {
-			vui_pop_width(VuiCtrlState_default);
-			vui_pop_height(VuiCtrlState_default);
-				vui_stack_layout();
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
-					vui_text(vui_sib_id, "lt", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_center_top)
-					vui_text(vui_sib_id, "ct", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
-					vui_text(vui_sib_id, "rt", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_left_center)
-					vui_text(vui_sib_id, "lc", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_center)
-					vui_text(vui_sib_id, "cc", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_right_center)
-					vui_text(vui_sib_id, "rc", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_left_bottom)
-					vui_text(vui_sib_id, "lb", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_center_bottom)
-					vui_text(vui_sib_id, "cb", 0.f);
-
-				vui_scope_align(VuiCtrlState_default, VuiAlign_right_bottom)
-					vui_text(vui_sib_id, "rb", 0.f);
-			}
-
-			vui_scope_offset(VuiCtrlState_default, -10.f, 5.f)
-			vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
-				vui_text_button(vui_sib_id, "test");
+			vui_scope_width(VuiCtrlState_default, 140.f)
+			vui_scope_height(VuiCtrlState_default, 140.f)
+			vui_scope_image_scale_mode(VuiCtrlState_default, VuiImageScaleMode_uniform)
+				vui_image_button(vui_sib_id, app_state.images[3], vui_color_white);
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "tester");
@@ -629,6 +594,42 @@ int main(int argc, char** argv) {
 		.style = &style,
 	};
 	vui_assert(vui_init(&setup), "failed to initialize vui");
+
+	{
+		VuiImage image;
+
+		//
+		// glyph texture
+		image.width = 1024,
+		image.height = 1024,
+		image.texture_id = 0,
+		image.uv_rect = VuiRect_init(0.f, 0.f, 1.f, 1.f),
+		app_state.images[0] = vui_image_add(&image);
+
+		//
+		// color texture
+		image.width = 256,
+		image.height = 256,
+		image.texture_id = 1,
+		image.uv_rect = VuiRect_init(0.f, 0.f, 1.f, 1.f),
+		app_state.images[1] = vui_image_add(&image);
+
+		//
+		// color texture subsection small icon
+		image.width = 32,
+		image.height = 32,
+		image.texture_id = 1,
+		image.uv_rect = VuiRect_init(0.5f, 0.5f, 0.7f, 0.7f),
+		app_state.images[2] = vui_image_add(&image);
+
+		//
+		// color texture subsection rectangle
+		image.width = 256,
+		image.height = 128,
+		image.texture_id = 1,
+		image.uv_rect = VuiRect_init(0.0f, 0.0f, 1.f, 0.5f),
+		app_state.images[3] = vui_image_add(&image);
+	}
 
 	uint8_t* liberation_sans_font_data = read_font_from_disk("fonts/LiberationSans-Regular.ttf");
 	vui_assert(stbtt_InitFont(&liberation_sans, liberation_sans_font_data, 0), "failed to initialize liberation_sans with stbtt");

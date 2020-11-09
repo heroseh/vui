@@ -448,6 +448,14 @@ enum {
 	VuiAlign_right_bottom,
 };
 
+typedef uint8_t VuiImageScaleMode;
+enum {
+	VuiImageScaleMode_stretch, // image is scaled to fit but will not maintain the aspect ratio
+	VuiImageScaleMode_uniform, // image is scaled to fit and will maintain the aspect ratio
+	VuiImageScaleMode_uniform_crop, // image is scaled to fit on a single side and crop the other, this will maintain the aspect ratio
+	VuiImageScaleMode_none, // image is not scaled, the original size is used.
+};
+
 typedef union VuiCtrlAttrValue VuiCtrlAttrValue;
 union VuiCtrlAttrValue {
 	float float_;
@@ -457,6 +465,7 @@ union VuiCtrlAttrValue {
 	VuiFontId font_id;
 	VuiAlign align;
 	VuiBool bool_;
+	VuiImageScaleMode image_scale_mode;
 };
 
 typedef uint64_t VuiCtrlAttrFlags; // VuiCtrlAttr -> VuiCtrlAttrFlags = (1 << VuiCtrlAttr_*)
@@ -483,6 +492,7 @@ enum {
     VuiCtrlAttr_check_color, // VuiColor
     VuiCtrlAttr_check_size, // float
     VuiCtrlAttr_separator_size, // float
+    VuiCtrlAttr_image_scale_mode, // VuiImageScaleMode
 	VuiCtrlAttr_text_font_id,
     VuiCtrlAttr_text_selection_color, // VuiColor
     VuiCtrlAttr_text_selection_radius, // VuiVec4.radius
@@ -551,6 +561,9 @@ void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_s
 
 #define VuiStyle_set_separator_size(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_separator_size, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
 #define VuiStyle_unset_separator_size(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_separator_size, ctrl_state)
+
+#define VuiStyle_set_image_scale_mode(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_image_scale_mode, ctrl_state, (VuiCtrlAttrValue) { .image_scale_mode = value })
+#define VuiStyle_unset_image_scale_mode(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_image_scale_mode, ctrl_state)
 
 #define VuiStyle_set_text_font_id(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_font_id, ctrl_state, (VuiCtrlAttrValue) { .font_id = value })
 #define VuiStyle_unset_text_font_id(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_font_id, ctrl_state)
@@ -644,6 +657,10 @@ extern void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr);
 #define vui_push_layout_wrap(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap, (VuiCtrlAttrValue) { .bool_ = value })
 #define vui_pop_layout_wrap(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap)
 #define vui_scope_layout_wrap(ctrl_state, value) _vui_defer_loop(vui_push_layout_wrap(ctrl_state, value), vui_pop_layout_wrap(ctrl_state))
+
+#define vui_push_image_scale_mode(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_image_scale_mode, (VuiCtrlAttrValue) { .image_scale_mode = value })
+#define vui_pop_image_scale_mode(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_image_scale_mode)
+#define vui_scope_image_scale_mode(ctrl_state, value) _vui_defer_loop(vui_push_image_scale_mode(ctrl_state, value), vui_pop_image_scale_mode(ctrl_state))
 
 typedef uint64_t VuiCtrlFlags;
 enum {
@@ -776,8 +793,8 @@ void vui_render_polyline(VuiVec2* points, uint32_t points_count, VuiColor color,
 void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
 void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_anchor_pos, VuiVec2 end_anchor_pos, VuiColor color, float width);
 
-void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint);
-void vui_render_image_(const VuiRect* rect, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiBool is_glyph);
+void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode);
+void vui_render_image_(const VuiRect* rect, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph);
 
 void vui_path_reset();
 void vui_path_plot_point(VuiVec2 pt);
