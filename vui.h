@@ -309,6 +309,7 @@ union VuiVec4 {
 #define VuiRect_right_top(rect) VuiVec2_init((rect).right, (rect).top)
 #define VuiRect_size(rect) VuiVec2_init((rect).left + (rect).right, (rect).top + (rect).bottom)
 static inline float VuiRect_width(const VuiRect* rect) { return rect->right - rect->left; }
+static inline float VuiRect_neg_width(const VuiRect* rect) { return rect->left - rect->right; }
 static inline float VuiRect_height(const VuiRect* rect) { return rect->bottom - rect->top; }
 VuiRect VuiRect_clip(const VuiRect* a, const VuiRect* b);
 VuiVec2 VuiRect_clip_pt(const VuiRect* rect, VuiVec2 pt);
@@ -927,7 +928,7 @@ typedef struct {
 
 VuiBool vui_init(VuiSetup* setup);
 
-void vui_frame_start();
+void vui_frame_start(VuiBool right_to_left);
 void vui_frame_end();
 
 void vui_window_start(VuiWindowId id, VuiVec2 size);

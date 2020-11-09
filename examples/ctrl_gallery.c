@@ -139,11 +139,11 @@ void build_ui() {
 	ScaledFont_clear_codepts(&liberation_sans_32px);
 	ScaledFont_clear_codepts(&liberation_mono_32px);
 
-	vui_frame_start();
+	vui_frame_start(vui_true);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 
-	vui_push_height(VuiCtrlState_default, 200.f);
+	vui_push_height(VuiCtrlState_default, 220.f);
 	vui_scope_layout_wrap(VuiCtrlState_default, vui_true)
 	vui_scope_layout_spacing(VuiCtrlState_default, 6.f)
 	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 20.f)
@@ -154,18 +154,17 @@ void build_ui() {
 		vui_row_layout();
 
 			VuiFocusState state = vui_text_button(vui_sib_id, "test");
-			printf("state = %u\n", state);
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "tester");
 
 			vui_scope_height_ratio(VuiCtrlState_default, 0.3)
-				vui_text_button(vui_sib_id, "test");
+				vui_text_button(vui_sib_id, "more");
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
-				vui_text_button(vui_sib_id, "test");
+				vui_text_button(vui_sib_id, "less");
 
-			vui_text_button(vui_sib_id, "test");
+			vui_text_button(vui_sib_id, "something long");
 	}
 
 	vui_window_end();

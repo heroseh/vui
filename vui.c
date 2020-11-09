@@ -320,7 +320,8 @@ struct VuiCtrlAttrChange {
 typedef uint32_t _VuiFlags;
 enum {
 	_VuiFlags_out_of_memory = 0x1,
-	_VuiFlags_pixel_snapping = 0x4,
+	_VuiFlags_pixel_snapping = 0x2,
+	_VuiFlags_right_to_left = 0x4,
 };
 
 typedef struct _VuiImage _VuiImage;
@@ -1518,13 +1519,11 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 		ctrl->attributes[attr] = *_VuiCtrl_style_attr(ctrl, attr);
 	}
 
-	printf("ctrl->id = %u\n", ctrl->id);
 	_vui.build.parent_ctrl_id = ctrl->id;
 	_vui.build.sibling_prev_ctrl_id = 0;
 }
 
 void vui_ctrl_end() {
-	printf("_vui.build.parent_ctrl_id = %u\n", _vui.build.parent_ctrl_id);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 	_vui.build.parent_ctrl_id = ctrl->parent_id;
 	_vui.build.sibling_prev_ctrl_id = ctrl->id;
@@ -2206,8 +2205,14 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 	_vui.render.clip_rect = parent_clip_rect;
 }
 
-void vui_frame_start() {
+void vui_frame_start(VuiBool right_to_left) {
 	vui_assert(_vui.build.w == NULL, "cannot call vui_frame_start until vui_window_end has been called");
+
+	if (right_to_left) {
+		_vui.flags |= _VuiFlags_right_to_left;
+	} else {
+		_vui.flags &= ~_VuiFlags_right_to_left;
+	}
 
 	_vui_ctrl_set_mouse_focused(0);
 	_vui_ctrl_set_mouse_scroll_focused(0);
@@ -2500,18 +2505,11 @@ VuiColumn // 500
 			VuiImage // finite
 			VuiText // auto
 			*/
-typedef uint8_t _VuiLayoutColumnRow;
-enum {
-	_VuiLayoutColumnRow_column,
-	_VuiLayoutColumnRow_column_right_to_left,
-	_VuiLayoutColumnRow_row,
-	_VuiLayoutColumnRow_row_right_to_left,
-};
 
 void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inner_width, float parent_inner_height);
 
 void _vui_layout_column_row(
-	VuiCtrl* ctrl, _VuiLayoutColumnRow type, float inner_x, float inner_y, float inner_width, float inner_height,
+	VuiCtrl* ctrl, VuiBool is_column, float inner_x, float inner_y, float inner_width, float inner_height,
 	VuiVec2* max_inner_right_bottom_ptr, VuiRect* child_placement_area_ptr
 ) {
 	VuiCtrlAttr dir_attr = 0;
@@ -2526,37 +2524,40 @@ void _vui_layout_column_row(
 	float* fill_portion_wrap_dir_len_ptr = NULL;
 	float* max_dir_inner_len_ptr = NULL;
 	float* max_wrap_dir_inner_len_ptr = NULL;
-	switch (type) {
-		case _VuiLayoutColumnRow_column:
-		case _VuiLayoutColumnRow_column_right_to_left:
-			inner_dir_offset = inner_x;
-			inner_wrap_dir_offset = inner_y;
-			inner_dir_len = inner_width;
-			inner_wrap_dir_len = inner_height;
-			dir_attr = VuiCtrlAttr_width;
-			wrap_dir_attr = VuiCtrlAttr_height;
+	if (is_column) {
+		if (_vui.flags & _VuiFlags_right_to_left) {
+			dir_rect_len = VuiRect_neg_width;
+		} else {
 			dir_rect_len = VuiRect_width;
-			wrap_dir_rect_len = VuiRect_height;
-			fill_portion_dir_len_ptr = &_vui.build.fill_portion_width;
-			fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_height;
-			max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
-			max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
-			break;
-		case _VuiLayoutColumnRow_row:
-		case _VuiLayoutColumnRow_row_right_to_left:
-			inner_dir_offset = inner_y;
-			inner_wrap_dir_offset = inner_x;
-			inner_dir_len = inner_height;
-			inner_wrap_dir_len = inner_width;
-			dir_attr = VuiCtrlAttr_height;
-			wrap_dir_attr = VuiCtrlAttr_width;
-			dir_rect_len = VuiRect_height;
+		}
+		inner_dir_offset = inner_x;
+		inner_wrap_dir_offset = inner_y;
+		inner_dir_len = inner_width;
+		inner_wrap_dir_len = inner_height;
+		dir_attr = VuiCtrlAttr_width;
+		wrap_dir_attr = VuiCtrlAttr_height;
+		wrap_dir_rect_len = VuiRect_height;
+		fill_portion_dir_len_ptr = &_vui.build.fill_portion_width;
+		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_height;
+		max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
+		max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
+	} else {
+		if (_vui.flags & _VuiFlags_right_to_left) {
+			wrap_dir_rect_len = VuiRect_neg_width;
+		} else {
 			wrap_dir_rect_len = VuiRect_width;
-			fill_portion_dir_len_ptr = &_vui.build.fill_portion_height;
-			fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_width;
-			max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
-			max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
-			break;
+		}
+		inner_dir_offset = inner_y;
+		inner_wrap_dir_offset = inner_x;
+		inner_dir_len = inner_height;
+		inner_wrap_dir_len = inner_width;
+		dir_attr = VuiCtrlAttr_height;
+		wrap_dir_attr = VuiCtrlAttr_width;
+		dir_rect_len = VuiRect_height;
+		fill_portion_dir_len_ptr = &_vui.build.fill_portion_height;
+		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_width;
+		max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
+		max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
 	}
 
 	//
@@ -2624,11 +2625,11 @@ void _vui_layout_column_row(
 	// these variable stop the child controls from filling and using ratio.
 	// they will be converted to vui_auto_len when _vui_layout_ctrls.
 	float layout_inner_width = inner_width;
-	if (wrap && (type == _VuiLayoutColumnRow_column || type == _VuiLayoutColumnRow_column_right_to_left)) {
+	if (wrap && is_column) {
 		layout_inner_width = vui_auto_len;
 	}
 	float layout_inner_height = inner_height;
-	if (wrap && (type == _VuiLayoutColumnRow_row || type == _VuiLayoutColumnRow_row_right_to_left)) {
+	if (wrap && !is_column) {
 		layout_inner_height = vui_auto_len;
 	}
 
@@ -2673,25 +2674,31 @@ void _vui_layout_column_row(
 		float line_inner_height = layout_inner_height;
 		float* child_placement_area_dir_len_start = NULL;
 		float* child_placement_area_dir_len_end = NULL;
-		switch (type) {
-			case _VuiLayoutColumnRow_column:
-			case _VuiLayoutColumnRow_column_right_to_left:
-				line_inner_height = max_wrap_dir_len;
+		if (is_column) {
+			if (_vui.flags & _VuiFlags_right_to_left) {
+				child_placement_area_ptr->right = dir_start;
+				child_placement_area_dir_len_start = &child_placement_area_ptr->right;
+				child_placement_area_dir_len_end = &child_placement_area_ptr->left;
+			} else {
 				child_placement_area_ptr->left = dir_start;
-				child_placement_area_ptr->top = wrap_dir_start;
-				child_placement_area_ptr->bottom = wrap_dir_start + max_wrap_dir_len;
 				child_placement_area_dir_len_start = &child_placement_area_ptr->left;
 				child_placement_area_dir_len_end = &child_placement_area_ptr->right;
-				break;
-			case _VuiLayoutColumnRow_row:
-			case _VuiLayoutColumnRow_row_right_to_left:
-				line_inner_width = max_wrap_dir_len;
+			}
+			line_inner_height = max_wrap_dir_len;
+			child_placement_area_ptr->top = wrap_dir_start;
+			child_placement_area_ptr->bottom = wrap_dir_start + max_wrap_dir_len;
+		} else {
+			if (_vui.flags & _VuiFlags_right_to_left) {
+				child_placement_area_ptr->right = wrap_dir_start;
+				child_placement_area_ptr->left = wrap_dir_start + max_wrap_dir_len;
+			} else {
 				child_placement_area_ptr->left = wrap_dir_start;
 				child_placement_area_ptr->right = wrap_dir_start + max_wrap_dir_len;
-				child_placement_area_ptr->top = dir_start;
-				child_placement_area_dir_len_start = &child_placement_area_ptr->top;
-				child_placement_area_dir_len_end = &child_placement_area_ptr->bottom;
-				break;
+			}
+			line_inner_width = max_wrap_dir_len;
+			child_placement_area_ptr->top = dir_start;
+			child_placement_area_dir_len_start = &child_placement_area_ptr->top;
+			child_placement_area_dir_len_end = &child_placement_area_ptr->bottom;
 		}
 
 		for (VuiCtrl* line_child = child_line_start; line_child != child; line_child = line_child->sibling_next_id ? vui_ctrl_get(line_child->sibling_next_id) : NULL) {
@@ -2700,15 +2707,17 @@ void _vui_layout_column_row(
 			_vui_layout_ctrls(line_child, child_placement_area_ptr, line_inner_width, line_inner_height);
 
 			//
-			// advance to the next column
+			// advance to the next cell
 			*child_placement_area_dir_len_start = *child_placement_area_dir_len_end + layout_spacing;
 		}
 
 		// advance to the new line
 		wrap_dir_start += max_wrap_dir_len;
-		if (wrap) wrap_dir_start += wrap_spacing;
+		if (wrap) {
+			wrap_dir_start += wrap_spacing;
+		}
 
-		// track the max bottom right for auto sized columns
+		// track the max bottom right for auto sized layouts
 		if (*child_placement_area_dir_len_end > *max_dir_inner_len_ptr) {
 			*max_dir_inner_len_ptr = *child_placement_area_dir_len_end;
 		}
@@ -2730,13 +2739,25 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	// while laying out the controls we use the rectangle as a relative
 	// offset from it's parent. the rectangle also uses the outer size.
 	// so it includes the margin, padding and inner size.
+	//
 	// we remove the margin from the control's rectangle when we _vui_layout_ctrls_finalize.
 	// this saves us having to deal with margin for the child controls in each type of layout.
-	ctrl->rect.left = placement_area->left;
+	//
+	// be aware that when we use right to left, we are still using positive offsets from the right
+	// edge of the screen. in _vui_layout_ctrls_finalize, this is taken away from the width of the screen.
+	//
+
+	if (_vui.flags & _VuiFlags_right_to_left) {
+		ctrl->rect.right = placement_area->right;
+	} else {
+		ctrl->rect.left = placement_area->left;
+	}
 	ctrl->rect.top = placement_area->top;
 
 	float border_width = ctrl->flags & VuiCtrlFlags_border ? ctrl->attributes[VuiCtrlAttr_border_width].float_ : 0.f;
-	float inner_x = margin->left + padding->left + border_width;
+	float inner_x = (_vui.flags & _VuiFlags_right_to_left)
+		? margin->right + padding->right + border_width
+		: margin->left + padding->left + border_width;
 	float inner_y = margin->top + padding->top + border_width;
 	float inner_width = vui_auto_len;
 	float inner_height = vui_auto_len;
@@ -2761,7 +2782,11 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		}
 
 		if (width != vui_auto_len) {
-			ctrl->rect.right = ctrl->rect.left + width;
+			if (_vui.flags & _VuiFlags_right_to_left) {
+				ctrl->rect.left = ctrl->rect.right + width;
+			} else {
+				ctrl->rect.right = ctrl->rect.left + width;
+			}
 			inner_width = width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
 		}
 	}
@@ -2781,7 +2806,6 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				height = parent_fill_portion_height;
 			} else if (height < 0) { // is ratio
 				float ratio = -height;
-				printf("parent_inner_height = %f\n", parent_inner_height);
 				height = parent_inner_height * ratio;
 			}
 		}
@@ -2797,19 +2821,24 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	switch (ctrl->layout_type) {
 		case VuiLayoutType_container: {
 			if (ctrl->child_first_id) {
-				child_placement_area = VuiRect_init_wh(inner_x, inner_y, inner_width, inner_height);
+				if (_vui.flags & _VuiFlags_right_to_left) {
+					child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
+				} else {
+					child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
+				}
 				VuiCtrl* child = vui_ctrl_get(ctrl->child_first_id);
 				_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
-				max_inner_right_bottom.x = inner_x + VuiRect_width(&child->rect);
+
+				max_inner_right_bottom.x = inner_x + (_vui.flags & _VuiFlags_right_to_left ? VuiRect_neg_width : VuiRect_width)(&child->rect);
 				max_inner_right_bottom.y = inner_y + VuiRect_height(&child->rect);
 			}
 			break;
 		};
 		case VuiLayoutType_column:
-			_vui_layout_column_row(ctrl, _VuiLayoutColumnRow_column, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
+			_vui_layout_column_row(ctrl, vui_true, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
 			break;
 		case VuiLayoutType_row:
-			_vui_layout_column_row(ctrl, _VuiLayoutColumnRow_row, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
+			_vui_layout_column_row(ctrl, vui_false, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
 			break;
 		case VuiLayoutType_stack: {
 			//
@@ -2821,10 +2850,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				VuiCtrl* child = NULL;
 				for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 					child = vui_ctrl_get(child_id);
-					child_placement_area = VuiRect_init_wh(inner_x, inner_y, 0, 0);
+					if (_vui.flags & _VuiFlags_right_to_left) {
+						child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
+					} else {
+						child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
+					}
 					_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
 
-					float width = VuiRect_width(&child->rect);
+					float width = (_vui.flags & _VuiFlags_right_to_left ? VuiRect_neg_width : VuiRect_width)(&child->rect);
 					if (width > max_width) max_width = width;
 
 					float height = VuiRect_height(&child->rect);
@@ -2835,19 +2868,27 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				// resolve the dimensions with automatic lengths
 				//
 				if (inner_width == vui_auto_len) {
-					ctrl->rect.right = ctrl->rect.left + max_width + padding->right + margin->right + border_width;
+					if (_vui.flags & _VuiFlags_right_to_left) {
+						ctrl->rect.left = ctrl->rect.right + max_width + padding->left + margin->left + border_width;
+					} else {
+						ctrl->rect.right = ctrl->rect.left + max_width + padding->right + margin->right + border_width;
+					}
 					inner_width = max_width;
 				}
 				if (inner_height == vui_auto_len) {
 					ctrl->rect.bottom = ctrl->rect.top + max_height + padding->bottom + margin->bottom + border_width;
-					inner_height = max_width;
+					inner_height = max_height;
 				}
 			}
 
 			VuiCtrl* child = NULL;
 			for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 				child = vui_ctrl_get(child_id);
-				child_placement_area = VuiRect_init_wh(inner_x, inner_y, inner_width, inner_height);
+				if (_vui.flags & _VuiFlags_right_to_left) {
+					child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
+				} else {
+					child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
+				}
 				_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
 			}
 			break;
@@ -2858,7 +2899,11 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	// resolve the dimensions with automatic lengths
 	//
 	if (inner_width == vui_auto_len) {
-		ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + margin->right + border_width;
+		if (_vui.flags & _VuiFlags_right_to_left) {
+			ctrl->rect.left = ctrl->rect.right + max_inner_right_bottom.x + padding->left + margin->left + border_width;
+		} else {
+			ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + margin->right + border_width;
+		}
 	}
 	if (inner_height == vui_auto_len) {
 		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + padding->bottom + margin->bottom + border_width;
@@ -2872,6 +2917,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		VuiVec2 size = VuiRect_size(ctrl->rect);
 		VuiVec2 offset = {0};
 		VuiAlign align = ctrl->attributes[VuiCtrlAttr_align].align;
+
 		switch (align) {
 			case VuiAlign_left_top: break;
 			case VuiAlign_center_top:
@@ -2904,8 +2950,10 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				break;
 		}
 
-		ctrl->rect.x += offset.x;
-		ctrl->rect.y += offset.y;
+		ctrl->rect.left += offset.x;
+		ctrl->rect.right += offset.x;
+		ctrl->rect.top += offset.y;
+		ctrl->rect.bottom += offset.y;
 	}
 
 	//
@@ -2914,14 +2962,19 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	_vui.build.fill_portion_height = parent_fill_portion_height;
 }
 
-void _vui_layout_ctrls_finalize(VuiCtrl* ctrl, VuiVec2 offset) {
-	ctrl->rect.right += offset.x;
+void _vui_layout_ctrls_finalize(VuiCtrl* ctrl, VuiVec2 offset, float root_width) {
+	if (_vui.flags & _VuiFlags_right_to_left) {
+		ctrl->rect.left = root_width - offset.x - ctrl->rect.left;
+		offset.x += ctrl->rect.right;
+		ctrl->rect.right = root_width - offset.x;
+	} else {
+		ctrl->rect.right += offset.x;
+		offset.x += ctrl->rect.left;
+		ctrl->rect.left = offset.x;
+	}
+
 	ctrl->rect.bottom += offset.y;
-
-	offset.x += ctrl->rect.left;
 	offset.y += ctrl->rect.top;
-
-	ctrl->rect.left = offset.x;
 	ctrl->rect.top = offset.y;
 
 	//
@@ -2935,7 +2988,7 @@ void _vui_layout_ctrls_finalize(VuiCtrl* ctrl, VuiVec2 offset) {
 	VuiCtrl* child = NULL;
 	for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 		child = vui_ctrl_get(child_id);
-		_vui_layout_ctrls_finalize(child, offset);
+		_vui_layout_ctrls_finalize(child, offset, root_width);
 	}
 }
 
@@ -2948,9 +3001,19 @@ void vui_window_end() {
 
 	float width = root->attributes[VuiCtrlAttr_width].float_;
 	float height = root->attributes[VuiCtrlAttr_height].float_;
-	VuiRect placement_area = VuiRect_init_wh(0.f, 0.f, width, height);
+	VuiRect placement_area = VuiRect_init_wh(0.f, 0.f, 0.f, 0.f);
 	_vui_layout_ctrls(root, &placement_area, width, height);
-	_vui_layout_ctrls_finalize(root, (VuiVec2){0});
+	if (_vui.flags & _VuiFlags_right_to_left) {
+		float tmp = root->rect.left;
+		root->rect.left = root->rect.right;
+		root->rect.right = tmp;
+	}
+
+	VuiCtrl* child = NULL;
+	for (VuiCtrlId child_id = root->child_first_id; child_id; child_id = child->sibling_next_id) {
+		child = vui_ctrl_get(child_id);
+		_vui_layout_ctrls_finalize(child, (VuiVec2){0}, root->attributes[VuiCtrlAttr_width].float_);
+	}
 	_vui.build.w = NULL;
 }
 
