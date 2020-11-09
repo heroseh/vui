@@ -676,7 +676,6 @@ enum {
 
 typedef uint8_t VuiLayoutType;
 enum {
-	VuiLayoutType_container,
 	VuiLayoutType_stack,
 	VuiLayoutType_row,
 	VuiLayoutType_column,
@@ -863,6 +862,8 @@ void vui_button_end();
 #define vui_text_button(sib_id, text) vui_text_button_(sib_id, text, strlen(text))
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length);
 VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
+#define vui_image_text_button(sib_id, image_id, image_tint, text) vui_image_text_button_(sib_id, image_id, image_tint, text, strlen(text))
+VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
 
 VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed);
 void vui_toggle_button_end();

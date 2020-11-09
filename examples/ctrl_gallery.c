@@ -152,10 +152,7 @@ void build_ui() {
 	vui_pop_height(VuiCtrlState_default);
 		vui_row_layout();
 
-			vui_scope_width(VuiCtrlState_default, 140.f)
-			vui_scope_height(VuiCtrlState_default, 140.f)
-			vui_scope_image_scale_mode(VuiCtrlState_default, VuiImageScaleMode_uniform)
-				vui_image_button(vui_sib_id, app_state.images[3], vui_color_white);
+			vui_image_text_button(vui_sib_id, app_state.images[2], vui_color_white, "hey look an image");
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "tester");

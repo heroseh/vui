@@ -1361,11 +1361,6 @@ void _vui_assert_layout_change() {
 	vui_assert(_vui.build.sibling_prev_ctrl_id == 0, "cannot change the layout when the control already has a child");
 }
 
-void vui_container_layout() {
-	_vui_assert_layout_change();
-	vui_ctrl_get(_vui.build.parent_ctrl_id)->layout_type = VuiLayoutType_container;
-}
-
 void vui_stack_layout() {
 	_vui_assert_layout_change();
 	vui_ctrl_get(_vui.build.parent_ctrl_id)->layout_type = VuiLayoutType_stack;
@@ -1506,11 +1501,6 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 			_vui_ctrl_insert(ctrl);
 		}
 	} else {
-		vui_assert(
-			parent_ctrl->layout_type != VuiLayoutType_container || parent_ctrl->child_first_id == 0,
-			"a container layout is only allowed a single child");
-
-
 		//
 		// it does not exist, allocate a new one.
 		VuiCtrlId id = 0;
@@ -1598,7 +1588,6 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 	VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width, parent->attributes[VuiCtrlAttr_text_font_id].font_id);
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
 	vui_scope_width(VuiCtrlState_default, size.x)
 	vui_scope_height(VuiCtrlState_default, size.y) {
@@ -1612,10 +1601,18 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 }
 
 void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint) {
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero) {
 		vui_ctrl_start(sib_id, _VuiCtrlFlags_image, 0);
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+		VuiImage* image = vui_image_get(image_id);
+		if (ctrl->attributes[VuiCtrlAttr_width].float_ == vui_auto_len) {
+			ctrl->attributes[VuiCtrlAttr_width].float_ = image->width;
+		}
+
+		if (ctrl->attributes[VuiCtrlAttr_height].float_ == vui_auto_len) {
+			ctrl->attributes[VuiCtrlAttr_height].float_ = image->height;
+		}
+
 		ctrl->image_id = image_id;
 		ctrl->image_tint = image_tint;
 		vui_ctrl_end();
@@ -1662,7 +1659,7 @@ void vui_button_end() {
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length) {
 	VuiFocusState state = vui_button_start(sib_id);
 	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
 		vui_text_(vui_sib_id, text, text_length, 0.f);
 	}
 	vui_button_end();
@@ -1670,9 +1667,25 @@ VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_le
 }
 
 VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint) {
-	// TODO push width and height
 	VuiFocusState state = vui_button_start(sib_id);
-	vui_image(vui_sib_id, image_id, image_tint);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+	}
+	vui_button_end();
+	return state;
+}
+
+VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
+	VuiFocusState state = vui_button_start(sib_id);
+	vui_column_layout();
+
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint);
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
+
 	vui_button_end();
 	return state;
 }
@@ -2827,10 +2840,11 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		}
 
 		if (width != vui_auto_len) {
+			float outer_width = width + (margin->left + margin->right);
 			if (_vui.flags & _VuiFlags_right_to_left) {
-				ctrl->rect.left = ctrl->rect.right + width;
+				ctrl->rect.left = ctrl->rect.right + outer_width;
 			} else {
-				ctrl->rect.right = ctrl->rect.left + width;
+				ctrl->rect.right = ctrl->rect.left + outer_width;
 			}
 			inner_width = width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
 		}
@@ -2856,7 +2870,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		}
 
 		if (height != vui_auto_len) {
-			ctrl->rect.bottom = ctrl->rect.top + height;
+			ctrl->rect.bottom = ctrl->rect.top + height + (margin->top + margin->bottom);
 			inner_height = height - (margin->top + margin->bottom) - (padding->top + padding->bottom) - border_width * 2;
 		}
 	}
@@ -2864,21 +2878,6 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	VuiRect child_placement_area = {0};
 	VuiVec2 max_inner_right_bottom = {0};
 	switch (ctrl->layout_type) {
-		case VuiLayoutType_container: {
-			if (ctrl->child_first_id) {
-				if (_vui.flags & _VuiFlags_right_to_left) {
-					child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
-				} else {
-					child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
-				}
-				VuiCtrl* child = vui_ctrl_get(ctrl->child_first_id);
-				_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
-
-				max_inner_right_bottom.x = inner_x + (_vui.flags & _VuiFlags_right_to_left ? VuiRect_neg_width : VuiRect_width)(&child->rect);
-				max_inner_right_bottom.y = inner_y + VuiRect_height(&child->rect);
-			}
-			break;
-		};
 		case VuiLayoutType_column:
 			_vui_layout_column_row(ctrl, vui_true, inner_x, inner_y, inner_width, inner_height, &max_inner_right_bottom, &child_placement_area);
 			break;
@@ -2895,12 +2894,8 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				VuiCtrl* child = NULL;
 				for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 					child = vui_ctrl_get(child_id);
-					if (_vui.flags & _VuiFlags_right_to_left) {
-						child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
-					} else {
-						child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
-					}
-					_vui_layout_ctrls(child, &child_placement_area, inner_width, inner_height);
+					child_placement_area = VuiRect_init(inner_x, inner_y, inner_x, inner_y);
+					_vui_layout_ctrls(child, &child_placement_area, vui_auto_len, vui_auto_len);
 
 					float width = (_vui.flags & _VuiFlags_right_to_left ? VuiRect_neg_width : VuiRect_width)(&child->rect);
 					if (width > max_width) max_width = width;
@@ -2913,15 +2908,16 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				// resolve the dimensions with automatic lengths
 				//
 				if (inner_width == vui_auto_len) {
+					float outer_width = max_width + (padding->left + padding->right) + (border_width * 2) + (margin->left + margin->right);
 					if (_vui.flags & _VuiFlags_right_to_left) {
-						ctrl->rect.left = ctrl->rect.right + max_width + padding->left + margin->left + border_width;
+						ctrl->rect.left = ctrl->rect.right + outer_width;
 					} else {
-						ctrl->rect.right = ctrl->rect.left + max_width + padding->right + margin->right + border_width;
+						ctrl->rect.right = ctrl->rect.left + outer_width;
 					}
 					inner_width = max_width;
 				}
 				if (inner_height == vui_auto_len) {
-					ctrl->rect.bottom = ctrl->rect.top + max_height + padding->bottom + margin->bottom + border_width;
+					ctrl->rect.bottom = ctrl->rect.top + max_height + (padding->top + padding->bottom) + (border_width * 2) + (margin->top + margin->bottom);
 					inner_height = max_height;
 				}
 			}
@@ -2930,7 +2926,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 			for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 				child = vui_ctrl_get(child_id);
 				if (_vui.flags & _VuiFlags_right_to_left) {
-					child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_height);
+					child_placement_area = VuiRect_init(inner_x + inner_width, inner_y, inner_x, inner_y + inner_height);
 				} else {
 					child_placement_area = VuiRect_init(inner_x, inner_y, inner_x + inner_width, inner_y + inner_height);
 				}
@@ -2945,13 +2941,13 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	//
 	if (inner_width == vui_auto_len) {
 		if (_vui.flags & _VuiFlags_right_to_left) {
-			ctrl->rect.left = ctrl->rect.right + max_inner_right_bottom.x + padding->left + margin->left + border_width;
+			ctrl->rect.left = ctrl->rect.right + max_inner_right_bottom.x + padding->left + border_width + margin->left;
 		} else {
-			ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + margin->right + border_width;
+			ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + border_width + margin->right;
 		}
 	}
 	if (inner_height == vui_auto_len) {
-		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + padding->bottom + margin->bottom + border_width;
+		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + padding->bottom + border_width + margin->bottom;
 	}
 
 	//
