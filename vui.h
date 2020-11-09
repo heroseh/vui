@@ -451,6 +451,7 @@ enum {
 typedef union VuiCtrlAttrValue VuiCtrlAttrValue;
 union VuiCtrlAttrValue {
 	float float_;
+	VuiVec2 vec2;
 	VuiThickness thickness;
 	VuiColor color;
 	VuiFontId font_id;
@@ -624,9 +625,9 @@ extern void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr);
 #define vui_pop_height_max_ratio(ctrl_state) vui_pop_height_max(ctrl_state, )
 #define vui_scope_height_max_ratio(ctrl_state, value) _vui_defer_loop(vui_push_height_max_ratio(ctrl_state, value), vui_pop_height_max(ctrl_state))
 
-#define vui_push_offset(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_offset, (VuiCtrlAttrValue) { .vec2 = value })
+#define vui_push_offset(ctrl_state, x, y) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_offset, (VuiCtrlAttrValue) { .vec2 = VuiVec2_init(x, y) })
 #define vui_pop_offset(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_offset)
-#define vui_scope_offset(ctrl_state, value) _vui_defer_loop(vui_push_offset(ctrl_state, value), vui_pop_offset(ctrl_state))
+#define vui_scope_offset(ctrl_state, x, y) _vui_defer_loop(vui_push_offset(ctrl_state, x, y), vui_pop_offset(ctrl_state))
 
 #define vui_push_align(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_align, (VuiCtrlAttrValue) { .align = value })
 #define vui_pop_align(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_align)
@@ -831,7 +832,7 @@ void vui_box_end();
 #define vui_scope_box(sib_id) _vui_defer_loop(vui_box_start(sib_id), vui_box_end())
 
 // wrap_at_width = 0.0 to not have word wrapping
-#define vui_text(text, wrap_at_width) vui_text_(text, strlen(text), wrap_at_width)
+#define vui_text(sib_id, text, wrap_at_width) vui_text_(sib_id, text, strlen(text), wrap_at_width)
 void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width);
 
 void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);

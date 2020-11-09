@@ -139,7 +139,7 @@ void build_ui() {
 	ScaledFont_clear_codepts(&liberation_sans_32px);
 	ScaledFont_clear_codepts(&liberation_mono_32px);
 
-	vui_frame_start(vui_true);
+	vui_frame_start(vui_false);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 
@@ -153,7 +153,44 @@ void build_ui() {
 	vui_pop_height(VuiCtrlState_default);
 		vui_row_layout();
 
-			VuiFocusState state = vui_text_button(vui_sib_id, "test");
+			vui_push_width(VuiCtrlState_default, 120.f);
+			vui_push_height(VuiCtrlState_default, 120.f);
+			vui_scope_box(vui_sib_id) {
+			vui_pop_width(VuiCtrlState_default);
+			vui_pop_height(VuiCtrlState_default);
+				vui_stack_layout();
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
+					vui_text(vui_sib_id, "lt", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_center_top)
+					vui_text(vui_sib_id, "ct", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
+					vui_text(vui_sib_id, "rt", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_left_center)
+					vui_text(vui_sib_id, "lc", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_center)
+					vui_text(vui_sib_id, "cc", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_right_center)
+					vui_text(vui_sib_id, "rc", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_left_bottom)
+					vui_text(vui_sib_id, "lb", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_center_bottom)
+					vui_text(vui_sib_id, "cb", 0.f);
+
+				vui_scope_align(VuiCtrlState_default, VuiAlign_right_bottom)
+					vui_text(vui_sib_id, "rb", 0.f);
+			}
+
+			vui_scope_offset(VuiCtrlState_default, -10.f, 5.f)
+			vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
+				vui_text_button(vui_sib_id, "test");
 
 			vui_scope_height(VuiCtrlState_default, vui_fill_len)
 				vui_text_button(vui_sib_id, "tester");

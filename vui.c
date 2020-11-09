@@ -1465,6 +1465,11 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 			_vui_ctrl_insert(ctrl);
 		}
 	} else {
+		vui_assert(
+			parent_ctrl->layout_type != VuiLayoutType_container || parent_ctrl->child_first_id == 0,
+			"a container layout is only allowed a single child");
+
+
 		//
 		// it does not exist, allocate a new one.
 		VuiCtrlId id = 0;
@@ -1619,7 +1624,10 @@ void vui_button_end() {
 
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length) {
 	VuiFocusState state = vui_button_start(sib_id);
-	vui_text_(vui_sib_id, text, text_length, 0.f);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
+		vui_text_(vui_sib_id, text, text_length, 0.f);
+	}
 	vui_button_end();
 	return state;
 }
@@ -2915,7 +2923,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	VuiVec2 placement_size = VuiRect_size(*placement_area);
 	if (placement_size.x > 0.f && placement_size.y > 0.f) {
 		VuiVec2 size = VuiRect_size(ctrl->rect);
-		VuiVec2 offset = {0};
+		VuiVec2 offset = ctrl->attributes[VuiCtrlAttr_offset].vec2;
 		VuiAlign align = ctrl->attributes[VuiCtrlAttr_align].align;
 
 		switch (align) {
