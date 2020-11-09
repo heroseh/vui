@@ -666,6 +666,14 @@ extern void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr);
 #define vui_pop_image_scale_mode(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_image_scale_mode)
 #define vui_scope_image_scale_mode(ctrl_state, value) _vui_defer_loop(vui_push_image_scale_mode(ctrl_state, value), vui_pop_image_scale_mode(ctrl_state))
 
+#define vui_push_bg_color(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_bg_color, (VuiCtrlAttrValue) { .color = value })
+#define vui_pop_bg_color(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_bg_color)
+#define vui_scope_bg_color(ctrl_state, value) _vui_defer_loop(vui_push_bg_color(ctrl_state, value), vui_pop_bg_color(ctrl_state))
+
+#define vui_push_radius(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_radius, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_radius(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_radius)
+#define vui_scope_radius(ctrl_state, value) _vui_defer_loop(vui_push_radius(ctrl_state, value), vui_pop_radius(ctrl_state))
+
 typedef uint64_t VuiCtrlFlags;
 enum {
 	VuiCtrlFlags_focusable = 0x1,

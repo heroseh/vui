@@ -936,6 +936,8 @@ void VuiStyle_init_default(VuiStyle* style) {
 	VuiStyle_set_border_color(style, VuiCtrlState_mouse_focused, vui_color_pumpkin);
 	VuiStyle_set_border_width(style, VuiCtrlState_mouse_focused, 4.f);
 	VuiStyle_set_text_color(style, VuiCtrlState_default, vui_color_white);
+	VuiStyle_set_check_color(style, VuiCtrlState_default, vui_color_wisteria);
+	VuiStyle_set_check_size(style, VuiCtrlState_default, 24.f);
 }
 
 // ===========================================================================================
@@ -1792,18 +1794,36 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 
 
 VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked) {
-	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
-	vui_ctrl_start(sib_id, flags, checked ? *checked + 1 : 0);
-	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
-	VuiBool is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
-	if (checked) *checked = is_active;
-	vui_ctrl_end();
+	VuiBool is_active = vui_false;
+	vui_scope_width(VuiCtrlState_default, vui_auto_len)
+	vui_scope_height(VuiCtrlState_default, vui_auto_len) {
+		VuiCtrlFlags flags =
+			VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
+		vui_ctrl_start(sib_id, flags, checked ? *checked + 1 : 0);
+		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
+		if (checked) *checked = is_active;
+
+		float check_size = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_size)->float_;
+		VuiColor check_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_color)->color;
+		vui_scope_bg_color(VuiCtrlState_default, check_color)
+		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_width(VuiCtrlState_default, check_size)
+		vui_scope_height(VuiCtrlState_default, check_size) {
+			VuiCtrlFlags checked_flags = is_active ? VuiCtrlFlags_background : 0;
+			vui_ctrl_start(vui_sib_id, checked_flags, 0);
+			vui_ctrl_end();
+		}
+
+
+		vui_ctrl_end();
+	}
 	return is_active;
 }
 
 VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, checked ? *checked + 1 : 0);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1811,16 +1831,24 @@ VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, u
 	if (!checked) checked = &c;
 
 	VuiBool state;
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
 	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_check_box(sib_id, checked);
+		state = vui_check_box(vui_sib_id, checked);
+		VuiCtrl* check_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+		if (check_box->state_flags & VuiCtrlStateFlags_active) {
+			ctrl->state_flags |= VuiCtrlStateFlags_active;
+		} else {
+			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
+		}
 		vui_text_(vui_sib_id, text, text_length, 0.f);
 	}
 
+	vui_ctrl_end();
 	return state;
 }
 
 VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, checked ? *checked + 1 : 0);
+	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1828,8 +1856,15 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 	if (!checked) checked = &c;
 
 	VuiBool state;
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
 	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_check_box(sib_id, checked);
+		state = vui_check_box(vui_sib_id, checked);
+		VuiCtrl* check_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+		if (check_box->state_flags & VuiCtrlStateFlags_active) {
+			ctrl->state_flags |= VuiCtrlStateFlags_active;
+		} else {
+			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
+		}
 		vui_image(vui_sib_id, image_id, image_tint);
 	}
 
@@ -1837,18 +1872,37 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 }
 
 VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
-	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
-	vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
+	VuiBool is_active = vui_false;
+	vui_scope_radius(VuiCtrlState_default, 100.f)
+	vui_scope_width(VuiCtrlState_default, vui_auto_len)
+	vui_scope_height(VuiCtrlState_default, vui_auto_len) {
+		VuiCtrlFlags flags =
+			VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
+		vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
+		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
+		if (is_active) *selected_sib_id = sib_id;
 
-	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
-	VuiBool is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
-	if (is_active) *selected_sib_id = sib_id;
+		float check_size = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_size)->float_;
+		VuiColor check_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_color)->color;
+		vui_scope_bg_color(VuiCtrlState_default, check_color)
+		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_width(VuiCtrlState_default, check_size)
+		vui_scope_height(VuiCtrlState_default, check_size) {
+			VuiCtrlFlags checked_flags = is_active ? VuiCtrlFlags_background : 0;
+			vui_ctrl_start(vui_sib_id, checked_flags, 0);
+			vui_ctrl_end();
+		}
+
+
+		vui_ctrl_end();
+	}
 	return is_active;
 }
 
 VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
+	vui_ctrl_start(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1856,16 +1910,24 @@ VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	if (is_active) *selected_sib_id = sib_id;
 
 	VuiBool state;
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
 	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
 		state = vui_radio_button(sib_id, selected_sib_id);
+		VuiCtrl* radio_button = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+		if (radio_button->state_flags & VuiCtrlStateFlags_active) {
+			ctrl->state_flags |= VuiCtrlStateFlags_active;
+		} else {
+			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
+		}
 		vui_text_(vui_sib_id, text, text_length, 0.f);
 	}
 
+	vui_ctrl_end();
 	return state;
 }
 
 VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
+	vui_ctrl_start(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1873,11 +1935,19 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	if (is_active) *selected_sib_id = sib_id;
 
 	VuiBool state;
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
 	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
 		state = vui_radio_button(sib_id, selected_sib_id);
+		VuiCtrl* radio_button = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+		if (radio_button->state_flags & VuiCtrlStateFlags_active) {
+			ctrl->state_flags |= VuiCtrlStateFlags_active;
+		} else {
+			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
+		}
 		vui_image(vui_sib_id, image_id, image_tint);
 	}
 
+	vui_ctrl_end();
 	return state;
 }
 
@@ -2216,10 +2286,9 @@ VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value) {
 // ===========================================================================================
 
 char* VuiLayoutType_strings[] = {
-	"container",
-	"stack",
-	"row",
-	"column",
+	[VuiLayoutType_stack] = "stack",
+	[VuiLayoutType_row] = "row",
+	[VuiLayoutType_column] = "column",
 };
 
 #define _VuiImageId_pool_id_MASK  0x000fffff
