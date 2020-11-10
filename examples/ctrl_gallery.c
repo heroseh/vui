@@ -141,6 +141,7 @@ void build_ui() {
 	vui_frame_start(vui_false);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
+	vui_row_layout();
 
 	vui_push_height(VuiCtrlState_default, 220.f);
 	vui_scope_layout_wrap(VuiCtrlState_default, vui_true)
@@ -152,32 +153,10 @@ void build_ui() {
 	vui_pop_height(VuiCtrlState_default);
 		vui_row_layout();
 
-			static VuiCtrlSibId selected_sib_id = 0;
-			VuiBool checked_1 = vui_text_radio_button(vui_sib_id, &selected_sib_id, "button 1");
-			printf("checked_1 = %s\n", checked_1 ? "true" : "false");
-
-			VuiBool checked_2 = vui_text_radio_button(vui_sib_id, &selected_sib_id, "button 2");
-			printf("checked_2 = %s\n", checked_2 ? "true" : "false");
-
-			VuiBool checked_3 = vui_text_radio_button(vui_sib_id, &selected_sib_id, "button 3");
-			printf("checked_3 = %s\n", checked_3 ? "true" : "false");
-
-			VuiBool checked_4 = vui_text_radio_button(vui_sib_id, &selected_sib_id, "button 4");
-			printf("checked_4 = %s\n", checked_4 ? "true" : "false");
-
-			VuiBool checked_5 = vui_text_radio_button(vui_sib_id, &selected_sib_id, "button 5");
-			printf("checked_5 = %s\n", checked_5 ? "true" : "false");
-
-			vui_scope_height(VuiCtrlState_default, vui_fill_len)
-				vui_text_button(vui_sib_id, "tester");
-
-			vui_scope_height_ratio(VuiCtrlState_default, 0.3)
-				vui_text_button(vui_sib_id, "more");
-
-			vui_scope_height(VuiCtrlState_default, vui_fill_len)
-				vui_text_button(vui_sib_id, "less");
-
-			vui_text_button(vui_sib_id, "something long");
+		static float v = 0;
+		VuiBool changed = vui_input_box_float(vui_sib_id, &v);
+		printf("changed = %s\n", changed ? "true" : "false");
+		printf("value = %f\n\n", v);
 	}
 
 	vui_window_end();
@@ -324,7 +303,7 @@ uint32_t utf8codepoint(char* str, int32_t* out_codepoint) {
 	return bytes;
 }
 
-VuiVec2 position_text(void* userdata, VuiFontId font_id, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
+VuiVec2 position_text(void* userdata, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
 	if (text_length == 0) { return VuiVec2_zero; }
 	ScaledFont* font = {0};
 	switch (font_id) {
@@ -333,11 +312,20 @@ VuiVec2 position_text(void* userdata, VuiFontId font_id, char* text, uint32_t te
 		default: printf("unreconginsed font_id %u\n", font_id); exit(1);
 	}
 
+
+	//
+	//
+	// TODO: remove ScaledFont and make the glyph texture support any text height.
+	// or maybe just to SDF fonts
+	//
+	//
+
 	int ascent, descent, line_gap;
 	stbtt_GetFontVMetrics(font->info, &ascent, &descent, &line_gap);
 
-	ascent = roundf(ascent * font->scale);
-	descent = roundf(descent * font->scale);
+	float scale = stbtt_ScaleForPixelHeight(font->info, text_height);
+	ascent = roundf(ascent * scale);
+	descent = roundf(descent * scale);
 
 	int32_t codept = 0;
 	uint32_t i = utf8codepoint(text, &codept);
@@ -367,8 +355,8 @@ VuiVec2 position_text(void* userdata, VuiFontId font_id, char* text, uint32_t te
 
 			/* get bounding box for character (may be offset to account for chars that dip above or below the line */
 			int c_x1, c_y1, c_x2, c_y2;
-			stbtt_GetGlyphBitmapBox(font->info, codept_glyph, font->scale, font->scale, &c_x1, &c_y1, &c_x2, &c_y2);
-			pos.x += roundf(advance_width * font->scale);
+			stbtt_GetGlyphBitmapBox(font->info, codept_glyph, scale, scale, &c_x1, &c_y1, &c_x2, &c_y2);
+			pos.x += roundf(advance_width * scale);
 		}
 
 		if (i >= text_length) break;
@@ -380,7 +368,7 @@ VuiVec2 position_text(void* userdata, VuiFontId font_id, char* text, uint32_t te
 		/* add kerning */
 		int kern;
 		kern = stbtt_GetGlyphKernAdvance(font->info, codept, next_codept);
-		pos.x += roundf(kern * font->scale);
+		pos.x += roundf(kern * scale);
 
 		codept = next_codept;
 		codept_glyph = next_codept_glyph;

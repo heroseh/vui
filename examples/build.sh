@@ -7,5 +7,5 @@ if test ! -f "$1.c"; then
 	exit 1
 fi
 
-clang -o $1 $1.c -g -lm -lGL -pthread -lX11 -lXrandr -lSDL2
+clang -D_GNU_SOURCE -o $1 $1.c -g -lm -lGL -pthread -lX11 -lXrandr -lSDL2
 

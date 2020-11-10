@@ -363,6 +363,7 @@ typedef struct {
 
 		struct {
 			char* string;
+			uint32_t string_len;
 			uint32_t string_cap;
 			uint32_t cursor_idx;
 			// signed offset from the cursor_idx.
@@ -643,9 +644,7 @@ void vui_input_add_actions(VuiInputActions actions) {
     _vui.input.actions |= actions;
 }
 
-void _vui_string_remove_range_shift(char* string, uint32_t start_idx, uint32_t end_idx) {
-	uint32_t string_len = strlen(string);
-
+uint32_t _vui_string_remove_range_shift(char* string, uint32_t string_len, uint32_t start_idx, uint32_t end_idx) {
 	uint32_t remove_count = end_idx - start_idx;
 	if (end_idx < string_len) {
 		char* dst = string + start_idx;
@@ -653,7 +652,9 @@ void _vui_string_remove_range_shift(char* string, uint32_t start_idx, uint32_t e
 		memmove(dst, src, string_len - end_idx);
 	}
 
-	string[end_idx] = '\0';
+	string_len -= end_idx - start_idx;
+	string[string_len] = '\0';
+	return string_len;
 }
 
 void vui_input_add_text(char* string, uint32_t string_length) {
@@ -674,14 +675,15 @@ void vui_input_add_text(char* string, uint32_t string_length) {
 
 		//
 		// remove the selected text from the string by doing a shift remove.
-		_vui_string_remove_range_shift(_vui.input.focused_text_box.string, start_idx, end_idx);
+		_vui.input.focused_text_box.string_len =
+			_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
 		_vui.input.focused_text_box.cursor_idx = start_idx;
 		_vui.input.focused_text_box.select_offset = 0;
 	}
 
-	uint32_t focused_text_box_string_len = strlen(_vui.input.focused_text_box.string);
 	for (uint32_t i = 0; i < string_length; i += 1) {
-		if (_vui.input.focused_text_box.cursor_idx + 1 >= _vui.input.focused_text_box.string_cap)
+		// + 1 to give space for the null terminator.
+		if (_vui.input.focused_text_box.string_len + 1 >= _vui.input.focused_text_box.string_cap)
 			break;
 
 		char ch = string[i];
@@ -694,7 +696,7 @@ void vui_input_add_text(char* string, uint32_t string_length) {
 					// and make sure its the only decimal place in the float string.
 					if (_vui.input.focused_text_box.cursor_idx > 0) {
 						VuiBool has_full_stop = vui_false;
-						for (uint32_t idx = 0; idx < focused_text_box_string_len; idx += 1) {
+						for (uint32_t idx = 0; idx < _vui.input.focused_text_box.string_len; idx += 1) {
 							if (_vui.input.focused_text_box.string[idx] == '.') {
 								has_full_stop = vui_true;
 								break;
@@ -708,8 +710,9 @@ void vui_input_add_text(char* string, uint32_t string_length) {
 				// fallthrough
 			case _VuiInputBoxType_s32:
 				if (ch == '-') {
-					copy = focused_text_box_string_len == 0 ||
+					copy = _vui.input.focused_text_box.string_len == 0 ||
 						(_vui.input.focused_text_box.cursor_idx == 0 && _vui.input.focused_text_box.string[0] != '-');
+					if (copy) break;
 				}
 				// fallthrough
 			case _VuiInputBoxType_u32:
@@ -720,12 +723,27 @@ void vui_input_add_text(char* string, uint32_t string_length) {
 		//
 		// copy the byte if it is valid for this type of input box
 		if (copy) {
+			char* dst_string = _vui.input.focused_text_box.string;
+			uint32_t dst_idx = _vui.input.focused_text_box.cursor_idx;
+
+			//
+			// shift the characters to the right of the index over by one.
+			// TODO: maybe validate the string upfront and do this shift all in one go.
+			//       it is unluckly that much text will come through here in one go though.
+			if (dst_idx < _vui.input.focused_text_box.string_len) {
+				void* src = dst_string + dst_idx;
+				memmove(src + 1, src, _vui.input.focused_text_box.string_len - dst_idx);
+			}
+
+			//
+			// insert the character
 			_vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx] = ch;
 			_vui.input.focused_text_box.cursor_idx += 1;
+			_vui.input.focused_text_box.string_len += 1;
 		}
 	}
 
-	_vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx] = '\0';
+	_vui.input.focused_text_box.string[_vui.input.focused_text_box.string_len] = '\0';
 }
 
 VuiBool vui_has_mouse_over_ctrl() {
@@ -773,6 +791,7 @@ void vui_ctrl_set_focused(VuiCtrlId ctrl_id) {
 	if (_vui.input.focused_text_box.string) {
 		_vui.text_box_focus_change_fn(vui_false);
 		_vui.input.focused_text_box.string = NULL;
+		_vui.input.focused_text_box.string_len = 0;
 		_vui.input.focused_text_box.string_cap = 0;
 	}
 }
@@ -929,6 +948,8 @@ const VuiCtrlAttrValue* _VuiCtrl_style_attr(VuiCtrl* ctrl, VuiCtrlAttr attr) {
 
 void VuiStyle_init_default(VuiStyle* style) {
 	memset(style, 0, sizeof(VuiStyle));
+	VuiStyle_set_width(style, VuiCtrlState_default, vui_auto_len);
+	VuiStyle_set_height(style, VuiCtrlState_default, vui_auto_len);
 	VuiStyle_set_bg_color(style, VuiCtrlState_default, vui_color_emerald);
 	VuiStyle_set_border_color(style, VuiCtrlState_default, vui_color_orange);
 	VuiStyle_set_border_width(style, VuiCtrlState_default, 4.f);
@@ -938,6 +959,10 @@ void VuiStyle_init_default(VuiStyle* style) {
 	VuiStyle_set_text_color(style, VuiCtrlState_default, vui_color_white);
 	VuiStyle_set_check_color(style, VuiCtrlState_default, vui_color_wisteria);
 	VuiStyle_set_check_size(style, VuiCtrlState_default, 24.f);
+	VuiStyle_set_text_height(style, VuiCtrlState_default, 32.f);
+	VuiStyle_set_text_cursor_width(style, VuiCtrlState_default, 4.f);
+	VuiStyle_set_text_cursor_color(style, VuiCtrlState_default, vui_color_wisteria);
+	VuiStyle_set_text_selection_color(style, VuiCtrlState_default, VuiColor_init(0x34, 0x98, 0xdb, 0x80));
 }
 
 // ===========================================================================================
@@ -999,10 +1024,10 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 	vui_render_image_(rect, 0.f, 0.f, glyph_texture_id, *uv_rect, _vui_render_glyph_color, VuiImageScaleMode_stretch, vui_true);
 }
 
-void vui_render_text(VuiVec2 left_top, VuiFontId font_id, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
+void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, text, text_length, left_top, _vui_render_glyph);
+		_vui.position_text_fn(_vui.position_text_userdata, font_id, text_height, text, text_length, left_top, _vui_render_glyph);
 	}
 }
 
@@ -1579,8 +1604,13 @@ void vui_box_end() {
 	vui_ctrl_end();
 }
 
-VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, text, text_length, VuiVec2_zero, NULL);
+void vui_box(VuiCtrlSibId sib_id) {
+	vui_box_start(sib_id);
+	vui_box_end();
+}
+
+VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id, float text_height) {
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, text_height, text, text_length, VuiVec2_zero, NULL);
 }
 
 void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width) {
@@ -1593,7 +1623,13 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 
 	VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width, parent->attributes[VuiCtrlAttr_text_font_id].font_id);
+	float text_height = parent->attributes[VuiCtrlAttr_text_height].float_;
+	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width,
+		parent->attributes[VuiCtrlAttr_text_font_id].font_id, text_height);
+	if (size.y == 0.f) {
+		size.y = text_height;
+	}
+
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
 	vui_scope_width(VuiCtrlState_default, size.x)
 	vui_scope_height(VuiCtrlState_default, size.y) {
@@ -2160,6 +2196,7 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 	VuiCtrlFlags flags = VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable;
 	vui_ctrl_start(sib_id, flags, 0);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	float text_height = ctrl->attributes[VuiCtrlAttr_text_height].float_;
 
 	// let the input box (non text box) use the internal string buffer
 	if (vui_ctrl_is_focused(ctrl->id) && type != _VuiInputBoxType_text) {
@@ -2177,6 +2214,7 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 			}
 			_vui.text_box_focus_change_fn(vui_true);
 			_vui.input.focused_text_box.string = string_in_out;
+			_vui.input.focused_text_box.string_len = strlen(string_in_out);
 			_vui.input.focused_text_box.string_cap = string_in_out_cap;
 			_vui.input.focused_text_box.cursor_idx = 0;
 			_vui.input.focused_text_box.select_offset = strlen(string_in_out);
@@ -2188,43 +2226,60 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 		}
 	}
 
-	/*
-	vui_stack_layout_start(1, VuiVec2_fill, &VuiCtrlStyle_zero);
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
+		//
+		// the text of the text box
+		vui_text_(vui_sib_id, string_in_out, strlen(string_in_out), 0.f);
 
-	VuiTextStyle* ts = vui_frame_data_alloc_elmt(VuiTextStyle);
-	ts->font = style->text_font;
-	ts->color = style->text_color;
-	vui_text_(string->DasStk_data, string->count, 0, ts);
+		//
+		// if we are focused, render the cursor or selection box.
+		if (vui_ctrl_is_focused(ctrl->id)) {
+			VuiFontId font_id = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_font_id)->font_id;
+			float radius = 0.f;
+			VuiColor bg_color = {0};
+			float cursor_width = 0.f;
 
-	if (vui_ctrl_is_focused(ctrl->id)) {
-		VuiVec2 start_idx_offset = _vui.position_text_fn(_vui.position_text_userdata, style->text_font.user_id, string->DasStk_data, _vui.input.focused_text_box.cursor_idx, VuiVec2_zero, NULL);
-		float cursor_width = 0;
-		bs = vui_frame_data_alloc_elmt(VuiBoxStyle);
-		if (_vui.input.focused_text_box.select_offset) {
-			VuiVec2 end_idx_offset = _vui.position_text_fn(_vui.position_text_userdata, style->text_font.user_id, string->DasStk_data, _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset, VuiVec2_zero, NULL);
-			if (_vui.input.focused_text_box.select_offset < 0) {
-				VuiVec2 tmp = end_idx_offset;
-				end_idx_offset = start_idx_offset;
-				start_idx_offset = tmp;
+			// get the offset to the cursor
+			VuiVec2 start_idx_offset = vui_get_text_size(string_in_out, _vui.input.focused_text_box.cursor_idx, 0.f, font_id, text_height);
+			if (_vui.input.focused_text_box.select_offset) {
+				//
+				// we are selecting so find the other end of the selection box
+				VuiVec2 end_idx_offset = vui_get_text_size(string_in_out,
+					_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset, 0.f, font_id, text_height);
+				if (_vui.input.focused_text_box.select_offset < 0) {
+					VuiVec2 tmp = end_idx_offset;
+					end_idx_offset = start_idx_offset;
+					start_idx_offset = tmp;
+				}
+
+				radius = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_selection_radius)->float_;
+				bg_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_selection_color)->color;
+				cursor_width = end_idx_offset.x - start_idx_offset.x;
+			} else {
+				//
+				// no selection, we have a cursor
+				radius = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_radius)->float_;
+				bg_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_color)->color;
+				cursor_width = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_width)->float_;
+
+				//
+				// evenly place the cursor in between two characters
+				if (_vui.input.focused_text_box.string_len > 0) {
+					start_idx_offset.x -= cursor_width / 2.f;
+				}
 			}
 
-			bs->radius = style->selection_radius;
-			bs->bg_color = style->selection_color;
-
-			cursor_width = end_idx_offset.x - start_idx_offset.x;
-		} else {
-			cursor_width = style->cursor_width;
-			bs->radius = style->cursor_radius;
-			bs->bg_color = style->cursor_color;
+			//
+			// place the cursor or selection box over the text
+			vui_scope_border_width(VuiCtrlState_default, 0.f)
+			vui_scope_bg_color(VuiCtrlState_default, bg_color)
+			vui_scope_offset(VuiCtrlState_default, start_idx_offset.x, 0.f)
+			vui_scope_width(VuiCtrlState_default, cursor_width)
+			vui_scope_height(VuiCtrlState_default, text_height)
+				vui_box(vui_sib_id);
 		}
-
-		vui_stack_layout_set_next_pos(VuiAlign_left_top, VuiVec2_init(start_idx_offset.x, 0));
-		vui_box_start(1, VuiVec2_init(cursor_width, style->text_font.line_height), bs);
-		vui_box_end();
 	}
-
-	vui_stack_layout_end(VuiVec2_zero);
-	*/
 
 	vui_ctrl_end();
 	return has_changed;
@@ -2448,13 +2503,15 @@ void vui_frame_start(VuiBool right_to_left) {
 			if ((actions & VuiInputActions_delete) == VuiInputActions_delete) {
 				if ((actions & VuiInputActions_delete_to_end_of_word) == VuiInputActions_delete_to_end_of_word) {
 					end_idx = str_len;
-				} else if (end_idx < str_len) {
+				} else if (_vui.input.focused_text_box.select_offset == 0 && end_idx < str_len) {
+					// nothing is selected so add one.
 					end_idx += 1;
 				}
 			} else {
 				if ((actions & VuiInputActions_delete_to_start_of_word) == VuiInputActions_delete_to_start_of_word) {
 					start_idx = 0;
-				} else if (start_idx > 0) {
+				} else if (_vui.input.focused_text_box.select_offset == 0 && start_idx > 0) {
+					// nothing is selected so add one.
 					start_idx -= 1;
 				}
 			}
@@ -2465,7 +2522,8 @@ void vui_frame_start(VuiBool right_to_left) {
 			if (start_idx != end_idx) {
 				_vui.input.focused_text_box.has_changed = vui_true;
 			}
-			_vui_string_remove_range_shift(_vui.input.focused_text_box.string, start_idx, end_idx);
+			_vui.input.focused_text_box.string_len =
+				_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
 		} else if (actions & VuiInputActions_home) {
 			if ((actions & VuiInputActions_select_to_document_home) == VuiInputActions_select_to_document_home) {
 				_vui.input.focused_text_box.select_offset = -(int32_t)_vui.input.focused_text_box.cursor_idx;
@@ -2623,6 +2681,7 @@ void vui_window_start(VuiWindowId id, VuiVec2 size) {
 		root_ctrl->hash = vui_fnv_hash_32_initial;
 		w->root_ctrl_id = id;
 	}
+	root_ctrl->last_frame_idx = _vui.build.frame_idx;
 
 	//
 	// copy over the attributes.
@@ -2887,6 +2946,13 @@ void _vui_layout_column_row(
 }
 
 void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inner_width, float parent_inner_height) {
+	if (ctrl->last_frame_idx != _vui.build.frame_idx) {
+		ctrl->rect = VuiRect_zero;
+		_vui_ctrl_unlink(ctrl);
+		_vui_ctrl_dealloc(ctrl->id);
+		return;
+	}
+
 	const VuiThickness* margin = &ctrl->attributes[VuiCtrlAttr_margin].thickness;
 	const VuiThickness* padding = &ctrl->attributes[VuiCtrlAttr_padding].thickness;
 
@@ -3143,6 +3209,7 @@ void vui_window_end() {
 	float width = root->attributes[VuiCtrlAttr_width].float_;
 	float height = root->attributes[VuiCtrlAttr_height].float_;
 	VuiRect placement_area = VuiRect_init_wh(0.f, 0.f, 0.f, 0.f);
+
 	_vui_layout_ctrls(root, &placement_area, width, height);
 	if (_vui.flags & _VuiFlags_right_to_left) {
 		float tmp = root->rect.left;
@@ -3155,6 +3222,7 @@ void vui_window_end() {
 		child = vui_ctrl_get(child_id);
 		_vui_layout_ctrls_finalize(child, (VuiVec2){0}, root->attributes[VuiCtrlAttr_width].float_);
 	}
+
 	_vui.build.w = NULL;
 }
 
@@ -3193,7 +3261,8 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 		VuiFontId font_id = ctrl->attributes[VuiCtrlAttr_text_font_id].font_id;
 		char* text = &_vui.render.w->text[ctrl->text_start_idx];
 		VuiColor color = ctrl->attributes[VuiCtrlAttr_text_color].color;
-		vui_render_text(ctrl->rect.left_top, font_id, text, ctrl->text_length, color, ctrl->text_wrap_width);
+		float text_height = ctrl->attributes[VuiCtrlAttr_text_height].float_;
+		vui_render_text(ctrl->rect.left_top, font_id, text_height, text, ctrl->text_length, color, ctrl->text_wrap_width);
 	}
 
 	const VuiThickness* padding = &ctrl->attributes[VuiCtrlAttr_padding].thickness;
