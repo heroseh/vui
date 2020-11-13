@@ -143,20 +143,52 @@ void build_ui() {
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 	vui_row_layout();
 
-	vui_push_height(VuiCtrlState_default, 220.f);
 	vui_scope_layout_wrap(VuiCtrlState_default, vui_true)
 	vui_scope_layout_spacing(VuiCtrlState_default, 6.f)
 	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 20.f)
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_init_even(4))
 	vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4))
 	vui_scope_box(vui_sib_id) {
-	vui_pop_height(VuiCtrlState_default);
+
+		static VuiVec2 size = {500.f, 500.f};
+		static VuiVec2 offset = {50.f, 50.f};
+		vui_scope_width(VuiCtrlState_default, 500.f)
+		vui_scope_height(VuiCtrlState_default, 500.f)
+		vui_scope_radius(VuiCtrlState_default, 10.f)
+		vui_scope_border_color(VuiCtrlState_default, vui_color_clouds)
+		vui_scope_bg_color(VuiCtrlState_default, vui_color_amethyst)
+		vui_scroll_view_start(vui_sib_id,
+			VuiScrollFlags_vertical |
+			VuiScrollFlags_resizable |
+			VuiScrollFlags_horizontal);
+
 		vui_row_layout();
 
-		static float v = 0;
-		VuiBool changed = vui_input_box_float(vui_sib_id, &v);
-		printf("changed = %s\n", changed ? "true" : "false");
-		printf("value = %f\n\n", v);
+		for (int i = 0; i < 5; i += 1) {
+			vui_ctrl_start(vui_sib_id + i, 0, 0);
+			vui_column_layout();
+
+			vui_scope_width(VuiCtrlState_default, 200.f)
+			vui_scope_border_color(VuiCtrlState_default, vui_color_pomegranate)
+			vui_scope_bg_color(VuiCtrlState_default, vui_color_midnight_blue)
+			vui_scope_height(VuiCtrlState_default, 200.f) {
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+				vui_box(vui_sib_id);
+			}
+
+			vui_ctrl_end();
+		}
+
+		vui_scroll_view_end();
 	}
 
 	vui_window_end();
@@ -487,8 +519,13 @@ void sdl2_handle_event(SDL_Event* e, InputState* s) {
 			}
 			break;
 		case SDL_MOUSEWHEEL:
-			s->mouse_wheel_x += e->wheel.x * 20.0;
-			s->mouse_wheel_y += e->wheel.y * 20.0;
+			if (SDL_GetModState() & KMOD_SHIFT) {
+				s->mouse_wheel_x += e->wheel.y * 20.0;
+				s->mouse_wheel_y += e->wheel.x * 20.0;
+			} else {
+				s->mouse_wheel_x += e->wheel.x * 20.0;
+				s->mouse_wheel_y += e->wheel.y * 20.0;
+			}
 			break;
 		case SDL_KEYUP:
 			switch (e->key.keysym.sym) {

@@ -16,6 +16,9 @@
 // ===========================================================================================
 
 #define VUI_DEBUG_ASSERTIONS 0
+#define VUI_DEBUG_CTRL_LAYOUT 1
+
+#define vui_debug_ctrl_layout_dump_file_path "/tmp/vui_ctrls"
 
 //
 // you can redefine these macros to supply your own custom memory allocation
@@ -234,10 +237,13 @@ typedef struct {
 
 #define VuiVec2_init(x, y) (VuiVec2){ x, y }
 #define VuiVec2_zero (VuiVec2){0}
+#define VuiVec2_auto (VuiVec2){vui_auto_len, vui_auto_len}
+#define VuiVec2_fill (VuiVec2){vui_fill_len, vui_fill_len}
 static inline VuiVec2 VuiVec2_add(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x + b.x, a.y + b.y); }
 static inline VuiVec2 VuiVec2_sub(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x - b.x, a.y - b.y); }
 static inline VuiVec2 VuiVec2_mul(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x * b.x, a.y * b.y); }
 static inline VuiVec2 VuiVec2_div(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x / b.x, a.y / b.y); }
+static inline VuiVec2 VuiVec2_neg(VuiVec2 v) { return VuiVec2_init(-v.x, -v.y); }
 static inline float VuiVec2_len(VuiVec2 v) { return sqrtf((v.x * v.x) + (v.y * v.y)); }
 static inline VuiVec2 VuiVec2_scale(VuiVec2 v, float by) { return VuiVec2_init(v.x * by, v.y * by); }
 static inline VuiVec2 VuiVec2_norm(VuiVec2 v) {
@@ -302,9 +308,9 @@ union VuiVec4 {
 #define VuiThickness_init(left, top, right, bottom) ((VuiVec4){.left = left_, .top = top_, .right = right_, .bottom = bottom_})
 #define VuiThickness_init_even(size) ((VuiVec4){.left=size, .top=size, .right=size, .bottom=size})
 #define VuiThickness_hv_init(horizontal, vertical) ((VuiVec4){.left=horizontal, .top=vertical, .right=horizontal, .bottom=vertical})
-#define VuiThickness_horizontal(thickness) ((thickness).left + (thickness).right)
-#define VuiThickness_vertical(thickness) ((thickness).top + (thickness).bottom)
 #define VuiThickness_hv(thickness) VuiVec2_init(((thickness).left + (thickness).right), (thickness).top + (thickness).bottom)
+static inline float VuiThickness_horizontal(const VuiThickness* thickness) { return thickness->left + thickness->right; }
+static inline float VuiThickness_vertical(const VuiThickness* thickness) { return thickness->top + thickness->bottom; }
 #define VuiRect_zero ((VuiVec4){0})
 #define VuiRect_init(left_, top_, right_, bottom_) ((VuiVec4){.left = left_, .top = top_, .right = right_, .bottom = bottom_})
 #define VuiRect_init_wh(left_, top_, width, height) ((VuiVec4){.left = left_, .top = top_, .right = (left_) + (width), .bottom = (top_) + (height)})
@@ -312,7 +318,7 @@ union VuiVec4 {
 
 #define VuiRect_left_bottom(rect) VuiVec2_init((rect).left, (rect).bottom)
 #define VuiRect_right_top(rect) VuiVec2_init((rect).right, (rect).top)
-#define VuiRect_size(rect) VuiVec2_init((rect).left + (rect).right, (rect).top + (rect).bottom)
+#define VuiRect_size(rect) VuiVec2_init((rect).right - (rect).left, (rect).bottom - (rect).top)
 static inline float VuiRect_width(const VuiRect* rect) { return rect->right - rect->left; }
 static inline float VuiRect_neg_width(const VuiRect* rect) { return rect->left - rect->right; }
 static inline float VuiRect_height(const VuiRect* rect) { return rect->bottom - rect->top; }
@@ -323,7 +329,6 @@ VuiBool VuiRect_intersects_pt(const VuiRect* r, VuiVec2 pt);
 
 typedef uint32_t VuiFontId;
 typedef uint32_t VuiImageId;
-typedef uint32_t VuiCtrlHash;
 typedef uint32_t VuiCtrlId;
 typedef uint32_t VuiCtrlSibId;
 
@@ -427,10 +432,10 @@ VuiBool vui_input_is_mouse_over_ctrl();
 VuiBool vui_input_is_mouse_scroll_focused_ctrl();
 VuiBool vui_input_is_mouse_focused_ctrl();
 
-VuiBool vui_ctrl_is_mouse_focused(VuiCtrlHash id_hash);
-VuiBool vui_ctrl_is_focused(VuiCtrlHash id_hash);
-VuiBool vui_ctrl_is_mouse_scroll_focused(VuiCtrlHash id_hash);
-void vui_ctrl_set_focused(VuiCtrlHash id_hash);
+VuiBool vui_ctrl_is_mouse_focused(VuiCtrlId ctrl_id);
+VuiBool vui_ctrl_is_focused(VuiCtrlId ctrl_id);
+VuiBool vui_ctrl_is_mouse_scroll_focused(VuiCtrlId ctrl_id);
+void vui_ctrl_set_focused(VuiCtrlId ctrl_id);
 
 // ===========================================================================================
 //
@@ -505,6 +510,15 @@ enum {
     VuiCtrlAttr_text_cursor_color, // VuiColor
     VuiCtrlAttr_text_cursor_width, // float
     VuiCtrlAttr_text_cursor_radius, // VuiVec4.radius
+    VuiCtrlAttr_scroll_bar_width, // float
+    VuiCtrlAttr_scroll_bar_border_width, // float
+    VuiCtrlAttr_scroll_bar_border_color, // VuiColor
+    VuiCtrlAttr_scroll_bar_bg_color, // VuiColor
+    VuiCtrlAttr_scroll_bar_radius, // float
+    VuiCtrlAttr_scroll_bar_margin, // VuiThickness
+    VuiCtrlAttr_scroll_bar_slider_border_width, // float
+    VuiCtrlAttr_scroll_bar_slider_border_color, // VuiColor
+    VuiCtrlAttr_scroll_bar_slider_bg_color, // VuiColor
     VuiCtrlAttr_COUNT,
 };
 
@@ -598,6 +612,33 @@ void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_s
 #define VuiStyle_set_text_cursor_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_cursor_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
 #define VuiStyle_unset_text_cursor_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_cursor_radius, ctrl_state)
 
+#define VuiStyle_set_scroll_bar_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
+#define VuiStyle_unset_scroll_bar_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_width, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_border_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_border_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
+#define VuiStyle_unset_scroll_bar_border_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_border_width, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_border_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_border_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
+#define VuiStyle_unset_scroll_bar_border_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_border_color, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
+#define VuiStyle_unset_scroll_bar_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_bg_color, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
+#define VuiStyle_unset_scroll_bar_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_radius, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_margin(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_margin, ctrl_state, (VuiCtrlAttrValue) { .thickness = value })
+#define VuiStyle_unset_scroll_bar_margin(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_margin, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_slider_border_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_border_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
+#define VuiStyle_unset_scroll_bar_slider_border_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_border_width, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_slider_border_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_border_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
+#define VuiStyle_unset_scroll_bar_slider_border_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_border_color, ctrl_state)
+
+#define VuiStyle_set_scroll_bar_slider_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
+#define VuiStyle_unset_scroll_bar_slider_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state)
+
 //
 // push and pop attributes for a given control state that override the global style
 extern void _vui_push_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr, VuiCtrlAttrValue value);
@@ -689,17 +730,27 @@ extern void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr);
 #define vui_pop_border_width(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_border_width)
 #define vui_scope_border_width(ctrl_state, value) _vui_defer_loop(vui_push_border_width(ctrl_state, value), vui_pop_border_width(ctrl_state))
 
+#define vui_push_border_color(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_border_color, (VuiCtrlAttrValue) { .color = value })
+#define vui_pop_border_color(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_border_color)
+#define vui_scope_border_color(ctrl_state, value) _vui_defer_loop(vui_push_border_color(ctrl_state, value), vui_pop_border_color(ctrl_state))
+
 typedef uint64_t VuiCtrlFlags;
 enum {
 	VuiCtrlFlags_focusable = 0x1,
-	VuiCtrlFlags_scrollable = 0x2,
-	VuiCtrlFlags_background = 0x4,
-	VuiCtrlFlags_border = 0x8,
-	VuiCtrlFlags_pressable = 0x10,
-	VuiCtrlFlags_toggleable = 0x20,
-	VuiCtrlFlags_selectable = 0x40,
-	_VuiCtrlFlags_image = 0x80,
-	_VuiCtrlFlags_text = 0x100,
+	VuiCtrlFlags_scrollable_vertical = 0x2,
+	VuiCtrlFlags_scrollable_vertical_always_show = 0x4,
+	VuiCtrlFlags_scrollable_horizontal = 0x8,
+	VuiCtrlFlags_scrollable_horizontal_always_show = 0x10,
+	VuiCtrlFlags_resizable = 0x20,
+	VuiCtrlFlags_background = 0x40,
+	VuiCtrlFlags_border = 0x80,
+	VuiCtrlFlags_pressable = 0x100,
+	VuiCtrlFlags_toggleable = 0x200,
+	VuiCtrlFlags_selectable = 0x400,
+	_VuiCtrlFlags_image = 0x800,
+	_VuiCtrlFlags_text = 0x1000,
+	_VuiCtrlFlags_show_vertical_bar = 0x2000,
+	_VuiCtrlFlags_show_horizontal_bar = 0x4000,
 };
 
 typedef uint8_t VuiLayoutType;
@@ -719,7 +770,8 @@ struct VuiCtrl {
 	VuiCtrlId child_last_id;
 	VuiCtrlId sibling_prev_id;
 	VuiCtrlId sibling_next_id;
-	VuiCtrlHash hash;
+	VuiCtrlId scroll_content_id;
+	VuiCtrlSibId sib_id;
 	uint32_t last_frame_idx;
 	VuiRect rect;
 	VuiCtrlStateFlags state_flags;
@@ -727,6 +779,7 @@ struct VuiCtrl {
 	VuiFocusState focus_state;
 	VuiCtrlFlags flags;
 	VuiCtrlRenderFn render_fn;
+	VuiVec2 scroll_offset;
 	union {
 		struct {
 			VuiImageId image_id;
@@ -736,6 +789,9 @@ struct VuiCtrl {
 			uint32_t text_start_idx;
 			uint32_t text_length;
 			uint32_t text_wrap_width;
+		};
+		struct {
+			VuiVec2 scroll_view_size;
 		};
 	};
 	VuiCtrlAttrValue attributes[VuiCtrlAttr_COUNT];
@@ -921,6 +977,7 @@ void vui_separator(VuiCtrlSibId sib_id);
 //
 VuiFocusState vui_button_start(VuiCtrlSibId sib_id);
 void vui_button_end();
+VuiFocusState vui_button(VuiCtrlSibId sib_id);
 #define vui_text_button(sib_id, text) vui_text_button_(sib_id, text, strlen(text))
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length);
 VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
@@ -989,7 +1046,6 @@ VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, Vui
 //     // do something with enum_value
 // }
 //
-//
 VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
 void vui_select_button_end();
 #define vui_text_select_button(sib_id, selected_sib_id, text) vui_text_select_button_(sib_id, selected_sib_id, text, strlen(text))
@@ -1011,7 +1067,8 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 //                 if you do not need this you can supply a value of NULL.
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
-
+//
+//
 VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked);
 #define vui_text_check_box(sib_id, checked, text) vui_text_check_box_(sib_id, checked, text, strlen(text))
 VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length);
@@ -1029,7 +1086,7 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 //                         and when selecting a button this will happen *selected_sib_id = @param(sib_id).
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
-
+//
 VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
 #define vui_text_radio_button(sib_id, selected_sib_id, text) vui_text_radio_button_(sib_id, selected_sib_id, text, strlen(text))
 VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length);
@@ -1037,10 +1094,6 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 
 /*
 void vui_progress_bar(VuiVec2 size, float value, float min, float max, VuiProgressBarStyle* style);
-
-void vui_scroll_bar(VuiCtrlSibId sib_id, float length, float* content_offset, float content_length, VuiBool is_horizontal, VuiScrollBarStyle* style);
-void vui_scroll_view_start(VuiCtrlSibId sib_id, VuiVec2* size, VuiVec2* content_offset, VuiScrollViewFlags flags, VuiScrollViewStyle* style);
-void vui_scroll_view_end();
 */
 
 // ====================================================================================
@@ -1056,11 +1109,58 @@ void vui_scroll_view_end();
 //
 // @param value: the pointer to the value that will be presented in the text box and written back out when modified.
 //
-
 VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap);
 VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value);
 VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value);
 VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value);
+
+typedef uint8_t VuiScrollFlags;
+//
+// WARNING: these must share the same values as the ones in VuiCtrlFlags.
+enum {
+	VuiScrollFlags_none = 0x0,
+	VuiScrollFlags_vertical = 0x2,
+	VuiScrollFlags_vertical_always_show = 0x4,
+	VuiScrollFlags_horizontal = 0x8,
+	VuiScrollFlags_horizontal_always_show = 0x10,
+	VuiScrollFlags_resizable = 0x20,
+};
+
+// ====================================================================================
+//
+//
+// Scroll View
+//
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+//
+// @param content_offset_in_out:
+//     a pointer to a content offset that can be used to keep track of the offest
+//     but it can also allow you to change the offset by setting the value that is pointed too.
+//     this value can be NULL if you do not need this functionality.
+//
+// @param size_in_out:
+//     a pointer to a size that can be used to keep track of the size when @param(flags) has the VuiScrollFlags_resizable bit set.
+//     but it can also allow you to change the size by setting the value that is pointed too.
+//     this value can be NULL if you do not need this functionality.
+//
+// @param flags: binary OR the values of VuiScrollFlags to enable features of the scroll view.
+//
+//    VuiScrollFlags_vertical:                enables vertical scrolling capabilities and will show a scroll bar when needed
+//
+//    VuiScrollFlags_vertical_always_show:    if vertical scrolling is enabled, then the scroll bar will always show
+//
+//    VuiScrollFlags_horizontal:              enables horizontal scrolling capabilities and will show a scroll bar when needed
+//
+//    VuiScrollFlags_horizontal_always_show:  if horizontal scrolling is enabled, then the scroll bar will always show
+//
+//    VuiScrollFlags_resizable:               allow you to resize the scroll view. if this is enabled then the width and height style attributes
+//                                            only initialize the size and do not change the size on future calls.
+//                                            unless the scroll view is not executed one frame and then reinitialized later.
+//
+#define vui_scroll_view_start(sib_id, flags) vui_scroll_view_start_(sib_id, NULL, NULL, flags)
+void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags);
+void vui_scroll_view_end();
 
 /*
 

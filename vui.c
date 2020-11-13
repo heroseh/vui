@@ -398,6 +398,8 @@ typedef struct {
 		VuiStyle local_style;
 		VuiCtrlAttrChange* ctrl_state_attr_change_list_heads[VuiCtrlState_COUNT][VuiCtrlAttr_COUNT];
 		VuiStyleChange* style_change_list_head;
+		VuiVec2* mouse_scroll_focused_content_offset;
+		VuiVec2* mouse_scroll_focused_size;
 	} build;
 
 	//
@@ -419,7 +421,7 @@ void _vui_push_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr, VuiCtrlAttrV
 
 	//
 	// see if there is already a value in that state's attribute.
-	VuiCtrlAttrFlags attr_flag = 1 << attr;
+	VuiCtrlAttrFlags attr_flag = (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
 	if (local_style->state_attr_flags[ctrl_state] & attr_flag) {
 		//
 		// a value already exists so allocate a new change to store the old attribute.
@@ -455,7 +457,7 @@ void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr) {
 		// so remove the flags from the the state's attribute flags.
 		// this will make future calls to _VuiCtrl_style_attr avoid getting
 		// this state's attribute value and instead use the global style at _vui.build.style
-		local_style->state_attr_flags[ctrl_state] &= ~(1 << attr);
+		local_style->state_attr_flags[ctrl_state] &= ~((VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr);
 		memset(style_value, 0, sizeof(*style_value));
 	}
 }
@@ -766,7 +768,7 @@ VuiBool vui_ctrl_is_focused(VuiCtrlId ctrl_id) {
 	return _vui.windows[_vui.focused_window_id].focused_ctrl_id == ctrl_id;
 }
 
-VuiBool vui_ctrl_is_mouse_scroll_focused(VuiCtrlHash ctrl_id) {
+VuiBool vui_ctrl_is_mouse_scroll_focused(VuiCtrlId ctrl_id) {
 	return _vui.mouse_scroll_focused_ctrl_id == ctrl_id;
 }
 
@@ -890,14 +892,14 @@ VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
 // ===========================================================================================
 
 void _VuiStyle_set_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state, VuiCtrlAttrValue value) {
-	style->state_attr_flags[ctrl_state] |= 1 << attr;
+	style->state_attr_flags[ctrl_state] |= (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
 	VuiCtrlAttrValue* style_value = &style->state_attr_values[ctrl_state][attr];
 	memset(style_value, 0, sizeof(*style_value));
 	*style_value = value;
 }
 
 void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state) {
-	style->state_attr_flags[ctrl_state] &= ~(1 << attr);
+	style->state_attr_flags[ctrl_state] &= ~((VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr);
 	VuiCtrlAttrValue* style_value = &style->state_attr_values[ctrl_state][attr];
 	memset(style_value, 0, sizeof(*style_value));
 }
@@ -920,7 +922,7 @@ const VuiCtrlAttrValue* VuiStyle_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrl
 	// look through each state from important to least important.
 	// if the control has that state and the attribute is enabled, then return a pointer to that attribute.
 	VuiCtrlStateFlags state_flags = ctrl_state_flags | VuiCtrlState_default;
-	VuiCtrlAttrFlags attr_flag = 1 << attr;
+	VuiCtrlAttrFlags attr_flag = (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
 	for (VuiCtrlState state = 0; state < VuiCtrlState_COUNT; state += 1) {
 		if ((state_flags & state) && style->state_attr_flags[state] & attr_flag) {
 			return &style->state_attr_values[state][attr];
@@ -963,6 +965,16 @@ void VuiStyle_init_default(VuiStyle* style) {
 	VuiStyle_set_text_cursor_width(style, VuiCtrlState_default, 4.f);
 	VuiStyle_set_text_cursor_color(style, VuiCtrlState_default, vui_color_wisteria);
 	VuiStyle_set_text_selection_color(style, VuiCtrlState_default, VuiColor_init(0x34, 0x98, 0xdb, 0x80));
+
+    VuiStyle_set_scroll_bar_width(style, VuiCtrlState_default, 24.f);
+    VuiStyle_set_scroll_bar_border_width(style, VuiCtrlState_default, 4.f);
+    VuiStyle_set_scroll_bar_border_color(style, VuiCtrlState_default, vui_color_dark_gray);
+    VuiStyle_set_scroll_bar_bg_color(style, VuiCtrlState_default, vui_color_black);
+    VuiStyle_set_scroll_bar_radius(style, VuiCtrlState_default, 4.f);
+    VuiStyle_set_scroll_bar_margin(style, VuiCtrlState_default, VuiThickness_init_even(2.f));
+    VuiStyle_set_scroll_bar_slider_border_width(style, VuiCtrlState_default, 4.f);
+    VuiStyle_set_scroll_bar_slider_border_color(style, VuiCtrlState_default, vui_color_alizarin);
+    VuiStyle_set_scroll_bar_slider_bg_color(style, VuiCtrlState_default, vui_color_orange);
 }
 
 // ===========================================================================================
@@ -1507,15 +1519,12 @@ void _vui_ctrl_insert(VuiCtrl* ctrl) {
 
 void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change) {
 	VuiCtrl* parent_ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
-	//
-	// hash the sib_id with its parent's hash. this will essentially create a unique hash.
-	VuiCtrlHash hash = vui_fnv_hash_32((char*)&sib_id, sizeof(sib_id), parent_ctrl->hash);
 
 	//
 	// try to find the control in the existing tree.
 	VuiCtrl* ctrl = parent_ctrl->child_first_id ? vui_ctrl_get(parent_ctrl->child_first_id) : NULL;
 	while (ctrl) {
-		if (ctrl->hash == hash) break;
+		if (ctrl->sib_id == sib_id) break;
 		ctrl = ctrl->sibling_next_id ? vui_ctrl_get(ctrl->sibling_next_id) : NULL;
 	}
 
@@ -1533,7 +1542,7 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 		VuiCtrlId id = 0;
 		ctrl = _vui_ctrl_alloc(&id);
 		ctrl->id = id;
-		ctrl->hash = hash;
+		ctrl->sib_id = sib_id;
 
 		_vui_ctrl_insert(ctrl);
 	}
@@ -1696,6 +1705,12 @@ VuiFocusState vui_button_start(VuiCtrlSibId sib_id) {
 
 void vui_button_end() {
 	vui_ctrl_end();
+}
+
+VuiFocusState vui_button(VuiCtrlSibId sib_id) {
+	VuiFocusState state = vui_button_start(sib_id);
+	vui_button_end();
+	return state;
 }
 
 VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length) {
@@ -1996,37 +2011,113 @@ void vui_progress_bar(float value, float min, float max) {
 
 	vui_ctrl_end();
 }
+*/
 
-void vui_scroll_bar(VuiCtrlSibId sib_id, float length, float* content_offset, float content_length, VuiBool is_horizontal, VuiScrollBarStyle* style) {
-	VuiVec2 size = VuiVec2_init(length, length);
-	if (is_horizontal) size.y = style->width;
-	else size.x = style->width;
+void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_scroll_bar_slider) {
+	//
+	// work out the container size of the scroll view.
+	// this is the viewport of the scroll view that is shorten
+	// when a scroll bar is visible.
+	VuiVec2 container_size = VuiRect_size(ctrl->rect);
+	{
+		float scroll_view_border_width = ctrl->attributes[VuiCtrlAttr_border_width].float_;
+		container_size.x -= scroll_view_border_width * 2;
+		container_size.y -= scroll_view_border_width * 2;
 
-	vui_box_start(sib_id, size, &style->box);
-	vui_stack_layout_start(0, VuiVec2_fill, &VuiCtrlStyle_zero);
+		VuiThickness* scroll_bar_margin = &ctrl->attributes[VuiCtrlAttr_scroll_bar_margin].thickness;
+		float scroll_bar_width = ctrl->attributes[VuiCtrlAttr_scroll_bar_width].float_;
+		if (ctrl->flags & _VuiCtrlFlags_show_vertical_bar) {
+			container_size.x -= scroll_bar_width + VuiThickness_horizontal(scroll_bar_margin);
+		}
+		if (ctrl->flags & _VuiCtrlFlags_show_horizontal_bar) {
+			container_size.y -= scroll_bar_width + VuiThickness_vertical(scroll_bar_margin);
+		}
+	}
+
+	//
+	// set the scroll offset and make sure it does go scroll further than the size of the content
+	VuiCtrl* content = vui_ctrl_get(ctrl->scroll_content_id);
+	VuiVec2 min = VuiVec2_min(VuiVec2_add(VuiVec2_neg(VuiRect_size(content->rect)), container_size), VuiVec2_zero);
+	VuiVec2 max = VuiVec2_zero;
+	ctrl->scroll_offset = VuiVec2_clamp(offset, min, max);
+
+	//
+	// if this is the scroll focused control, then write back out to the pointer that holds the scroll offset passed in to vui_scroll_view_start_
+	if ((vui_ctrl_is_mouse_scroll_focused(ctrl->id) || holding_scroll_bar_slider) && _vui.build.mouse_scroll_focused_content_offset) {
+		*_vui.build.mouse_scroll_focused_content_offset = ctrl->scroll_offset;
+	}
+}
+
+void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags) {
+	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
+	vui_ctrl_start(sib_id, flags | VuiCtrlFlags_background | VuiCtrlFlags_border, 0);
+	VuiCtrlId scroll_view_ctrl_id = _vui.build.parent_ctrl_id;
+	VuiCtrl* ctrl = vui_ctrl_get(scroll_view_ctrl_id);
+
+	//
+	// keep track of the in_out pointers so we can potentially set these later in the pipeline.
+	if (vui_ctrl_is_mouse_scroll_focused(ctrl->id)) {
+		_vui.build.mouse_scroll_focused_content_offset = content_offset_in_out;
+		_vui.build.mouse_scroll_focused_size = size_in_out;
+	}
+
+	if (size_in_out) {
+		ctrl->scroll_view_size = *size_in_out;
+	} else if (ctrl->scroll_view_size.x == 0.f && ctrl->scroll_view_size.y == 0.f) {
+		ctrl->scroll_view_size.x = ctrl->attributes[VuiCtrlAttr_width].float_;
+		ctrl->scroll_view_size.y = ctrl->attributes[VuiCtrlAttr_height].float_;
+	}
+
+	//
+	// a resizable scroll view uses the ctrl->scroll_view_size field as it width and height
+	if (flags & VuiScrollFlags_resizable) {
+		ctrl->attributes[VuiCtrlAttr_width].float_ = ctrl->scroll_view_size.x;
+		ctrl->attributes[VuiCtrlAttr_height].float_ = ctrl->scroll_view_size.y;
+	}
+
+	//
+	// create the infinitely sized control to house the scrollable content.
+	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+	vui_scope_width(VuiCtrlState_default, vui_auto_len)
+	vui_scope_height(VuiCtrlState_default, vui_auto_len)
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
+		vui_ctrl_start(-1, 0, 0);
+		ctrl = vui_ctrl_get(scroll_view_ctrl_id);
+		ctrl->scroll_content_id = _vui.build.parent_ctrl_id;
+	}
+
+	//
+	// update the scroll offset with the value stored in the content_offset_in_out
+	if (content_offset_in_out) {
+		VuiCtrl_set_scroll_offset(ctrl, *content_offset_in_out, vui_false);
+	}
+}
+
+VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float container_length, float* content_offset_in_out, float content_length, VuiBool is_horizontal) {
+	if (content_length < 1.0) content_length = 1.0;
+	vui_scope_width(VuiCtrlState_default, is_horizontal ? length : width)
+	vui_scope_height(VuiCtrlState_default, is_horizontal ? width : length)
+	vui_box_start(sib_id);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	//
 	// work out the slider size
 	VuiVec2 slider_size = VuiVec2_fill;
-	float bar_content_length = 0;
+	float bar_content_length = length - ctrl->attributes[VuiCtrlAttr_border_width].float_ * 2.f;
 	float* slider_long_side_length = NULL;
-	VuiVec2 bar_content_size = vui_get_content_size();
 	if (is_horizontal) {
 		slider_long_side_length = &slider_size.x;
-		bar_content_length = bar_content_size.x;
 	} else {
 		slider_long_side_length = &slider_size.y;
-		bar_content_length = bar_content_size.y;
 	}
 
-	float min_slider_len = style->width / 2.0;
+	float min_slider_len = width;
 	// calculate the long side length of the slider that is clamp to a min(min_slider_len) and vui_max(bar_content_length)
-	float unclamped_slider_len = bar_content_length * (length / content_length);
+	float unclamped_slider_len = bar_content_length * container_length / content_length;
 	float slider_len = vui_min(bar_content_length, vui_max(min_slider_len, unclamped_slider_len));
 
 	*slider_long_side_length = slider_len;
-
-
 
 	//
 	// work out the slider offset
@@ -2036,161 +2127,189 @@ void vui_scroll_bar(VuiCtrlSibId sib_id, float length, float* content_offset, fl
 	// scroll bar inner len into a coordinate space that suits the clamped slider
 	float max_slider_offset = bar_content_length - slider_len;
 	float unclampled_max_slider_offset = bar_content_length - unclamped_slider_len;
-	float max_slider_offset_clamp_ratio = max_slider_offset / unclampled_max_slider_offset;
+	float max_slider_offset_clamp_ratio = unclampled_max_slider_offset == 0.f ? 0.f : max_slider_offset / unclampled_max_slider_offset;
 
 	// convert content offset into a slider offset
 	// content_offset is always <= 0 and slider_offset is >= 0
-	float slider_offset = ((-*content_offset / content_length) * (bar_content_length * max_slider_offset_clamp_ratio));
+	float slider_offset = ((-*content_offset_in_out / content_length) * (bar_content_length * max_slider_offset_clamp_ratio));
 	slider_offset = vui_max(0.0, vui_min(slider_offset, max_slider_offset));
 	if (is_horizontal) slider_offset_vec.x = slider_offset;
 	else slider_offset_vec.y = slider_offset;
 
-	vui_stack_layout_set_next_pos(VuiAlign_left_top, slider_offset_vec);
-	if (vui_press_button_start(1, slider_size, &style->slider)) {
-		float pos_offset = is_horizontal
-			? _vui.input.mouse.offset_x
-			: _vui.input.mouse.offset_y;
+    float slider_border_width = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_border_width].float_;
+    VuiColor slider_border_color = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_border_color].color;
+    VuiColor slider_bg_color = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_bg_color].color;
 
-		// offset the slider offset and convert the offset into a content offset
-		slider_offset = vui_max(0.0, vui_min(slider_offset + pos_offset, max_slider_offset));
-		*content_offset = -(slider_offset / (bar_content_length * max_slider_offset_clamp_ratio)) * content_length;
+	VuiBool offset_changed = vui_false;
+	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+	vui_scope_width(VuiCtrlState_default, slider_size.x)
+	vui_scope_height(VuiCtrlState_default, slider_size.y)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
+	vui_scope_offset(VuiCtrlState_default, slider_offset_vec.x, slider_offset_vec.y)
+	vui_scope_bg_color(VuiCtrlState_default, slider_bg_color)
+	vui_scope_border_width(VuiCtrlState_default, slider_border_width)
+	vui_scope_border_color(VuiCtrlState_default, slider_border_color) {
+		VuiFocusState state = vui_button_start(vui_sib_id);
+		offset_changed = state == VuiFocusState_held || state == VuiFocusState_pressed;
+		if (offset_changed) {
+			float pos_offset = is_horizontal
+				? _vui.input.mouse.offset_x
+				: _vui.input.mouse.offset_y;
+
+			// offset the slider offset and convert the offset into a content offset
+			slider_offset = vui_max(0.0, vui_min(slider_offset + pos_offset, max_slider_offset));
+			*content_offset_in_out = max_slider_offset_clamp_ratio == 0.f ? 0.f : -(slider_offset / (bar_content_length * max_slider_offset_clamp_ratio)) * content_length;
+		}
+		vui_button_end();
 	}
-	vui_press_button_end();
 
-	vui_stack_layout_end(VuiVec2_zero);
 	vui_box_end();
-}
-
-typedef struct {
-    VuiScrollBarStyle* sb_style;
-    VuiVec2* size;
-    VuiVec2* content_offset;
-    VuiScrollViewFlags flags;
-	VuiCtrlHash hash;
-} _VuiScrollViewState;
-typedef_DasStk(_VuiScrollViewState);
-
-DasStk(_VuiScrollViewState) _vui_scroll_view_state_stk = {0};
-
-void vui_scroll_view_start(VuiCtrlSibId sib_id, VuiVec2* size, VuiVec2* content_offset, VuiScrollViewFlags flags, VuiScrollViewStyle* style) {
-	vui_box_start(id | VuiCtrlSibId_scrollable_mask, *size, &style->box);
-
-	VuiCtrl* ctrl = DasStk_get(&_vui.build.w->ctrls, _vui.build.parent_ctrl_idx);
-	vui_assert(
-		!(flags & VuiScrollViewFlags_horizontal_scroll) || isfinite(ctrl->rect.right_bottom.x),
-		"scroll view has horizontal scroll flags, so it must have a known width. "
-		"be careful when using vui_fill_len as it can inherit vui_auto_len from its parent");
-	vui_assert(
-		!(flags & VuiScrollViewFlags_vertical_scroll) || isfinite(ctrl->rect.right_bottom.y),
-		"scroll view has vertical scroll flags, so it must have a known height. "
-		"be careful when using vui_fill_len as it can inherit vui_auto_len from its parent");
-
-	if (size->x == vui_fill_len) size->x = (ctrl->rect.right_bottom.x - ctrl->rect.left_top.x) + style->box.border.width * 2;
-	if (size->y == vui_fill_len) size->y = (ctrl->rect.right_bottom.y - ctrl->rect.left_top.y) + style->box.border.width * 2;
-
-	_VuiScrollViewState* state = DasStk_push(&_vui_scroll_view_state_stk, NULL);
-	state->hash = vui_get_ctrl_id_hash();
-	state->sb_style = &style->scroll_bar;
-	state->size = size;
-	state->content_offset = content_offset;
-	state->flags = flags;
-
-	vui_stack_layout_start(0, VuiVec2_fill, &VuiCtrlStyle_zero);
-	vui_stack_layout_set_next_pos(VuiAlign_left_top, *content_offset);
-	vui_container_layout_start(1, VuiVec2_auto, &VuiCtrlStyle_zero);
+	return offset_changed;
 }
 
 void vui_scroll_view_end() {
-	_VuiScrollViewState* state = DasStk_get_last(&_vui_scroll_view_state_stk);
-	DasStk_pop(&_vui_scroll_view_state_stk, NULL);
+	vui_ctrl_end();
 
-	VuiCtrl* container_ctrl = vui_get_ctrl();
-	vui_container_layout_end();
+	VuiCtrlId scroll_area_ctrl_id = _vui.build.parent_ctrl_id;
+	VuiCtrl* scroll_area = vui_ctrl_get(scroll_area_ctrl_id);
+	VuiCtrl* content = vui_ctrl_get(scroll_area->scroll_content_id);
+	VuiVec2 content_size = VuiRect_size(content->rect);
+	VuiVec2 container_size = VuiRect_size(scroll_area->rect);
+	VuiThickness scroll_bar_margin = scroll_area->attributes[VuiCtrlAttr_scroll_bar_margin].thickness;
+	float scroll_bar_width = scroll_area->attributes[VuiCtrlAttr_scroll_bar_width].float_;
+	VuiCtrlFlags flags = scroll_area->flags;
+	float scroll_view_border_width = scroll_area->attributes[VuiCtrlAttr_border_width].float_;
+	VuiBool can_show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical;
+	VuiBool can_show_horizontal_bar = flags & VuiCtrlFlags_scrollable_vertical;
+	VuiBool show_vertical_bar = vui_false;
+	VuiBool show_horizontal_bar = vui_false;
+	//
+	// determine whether each of the scroll bars are visible or not.
+	// and use this to workout the size of the container (the viewport of the scrollable content)
+	//
+	{
+		container_size.x -= scroll_view_border_width * 2;
+		container_size.y -= scroll_view_border_width * 2;
 
-	// if we have scroll focus and the mouse wheel has moved.
-	// offset the content_offset using the mouse wheel offset.
-	if (vui_ctrl_is_mouse_scroll_focused(state->hash)) {
-		VuiVec2 mouse_wheel_offset = VuiVec2_init(_vui.input.mouse.wheel_offset_x, _vui.input.mouse.wheel_offset_y);
-		if ((state->flags & VuiScrollViewFlags_vertical_scroll) != VuiScrollViewFlags_vertical_scroll)  mouse_wheel_offset.y = 0;
-		if ((state->flags & VuiScrollViewFlags_horizontal_scroll) != VuiScrollViewFlags_horizontal_scroll)  mouse_wheel_offset.x = 0;
-		if (mouse_wheel_offset.x != 0.0 || mouse_wheel_offset.y != 0.0) {
-			*state->content_offset = VuiVec2_add(*state->content_offset, mouse_wheel_offset);
+		if (can_show_vertical_bar) {
+			show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical_always_show || content_size.y > container_size.y;
+		}
+
+		if (show_vertical_bar) {
+			container_size.x -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
+			scroll_area->flags |= _VuiCtrlFlags_show_vertical_bar;
+		} else {
+			scroll_area->flags &= ~_VuiCtrlFlags_show_vertical_bar;
+		}
+
+		if (can_show_horizontal_bar) {
+			show_horizontal_bar = flags & VuiCtrlFlags_scrollable_horizontal_always_show;
+			if (!show_horizontal_bar) {
+				show_horizontal_bar = content_size.x > container_size.x;
+			}
+		}
+
+		if (show_horizontal_bar) {
+			container_size.y -= scroll_bar_width + VuiThickness_vertical(&scroll_bar_margin);
+			scroll_area->flags |= _VuiCtrlFlags_show_horizontal_bar;
+
+			if (can_show_vertical_bar && !show_vertical_bar) {
+				show_vertical_bar = content_size.y > container_size.y;
+				if (show_vertical_bar) {
+					container_size.x -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
+					scroll_area->flags |= _VuiCtrlFlags_show_vertical_bar;
+				} else {
+					scroll_area->flags &= ~_VuiCtrlFlags_show_vertical_bar;
+				}
+			}
+
+		} else {
+			scroll_area->flags &= ~_VuiCtrlFlags_show_horizontal_bar;
 		}
 	}
 
-	VuiVec2 content_size = VuiVec2_sub(container_ctrl->rect.right_bottom, container_ctrl->rect.left_top);
+	//
+	// WARNING: do not use the variable scroll_area past here.
+	// copy the data out fo the scroll area, as when we start new controls
+	// they can reallocate the control pool and the pointer will be invalid.
+	float scroll_bar_border_width = scroll_area->attributes[VuiCtrlAttr_scroll_bar_border_width].float_;
+	VuiColor scroll_bar_border_color = scroll_area->attributes[VuiCtrlAttr_scroll_bar_border_color].color;
+	VuiColor scroll_bar_bg_color = scroll_area->attributes[VuiCtrlAttr_scroll_bar_bg_color].color;
+	float scroll_bar_radius = scroll_area->attributes[VuiCtrlAttr_scroll_bar_radius].float_;
+	VuiVec2 scroll_offset = scroll_area->scroll_offset;
+	VuiVec2 scroll_view_size = scroll_area->scroll_view_size;
 
-	VuiCtrl* stack_layout_ctrl = DasStk_get(&_vui.build.w->ctrls, _vui.build.parent_ctrl_idx);
-	VuiVec2 scroll_view_content_size = VuiRect_size(stack_layout_ctrl->rect);
-	if (!isfinite(scroll_view_content_size.x)) scroll_view_content_size.x = content_size.x;
-	if (!isfinite(scroll_view_content_size.y)) scroll_view_content_size.y = content_size.y;
-
-	float sb_width = state->sb_style->width;
-	if ((state->flags & VuiScrollViewFlags_resizable) == VuiScrollViewFlags_resizable) {
-		scroll_view_content_size.x -= sb_width + state->sb_style->box.border.width;
-		scroll_view_content_size.y -= sb_width + state->sb_style->box.border.width;
+	//
+	// workout the long side lengths of the scroll bars
+	float scroll_bar_length_horizontal = scroll_view_size.x - VuiThickness_horizontal(&scroll_bar_margin) - scroll_view_border_width * 2;
+	float scroll_bar_length_vertical = scroll_view_size.y - VuiThickness_vertical(&scroll_bar_margin) - scroll_view_border_width * 2;
+	if (flags & VuiCtrlFlags_resizable || show_vertical_bar) {
+		scroll_bar_length_horizontal -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
+	}
+	if (flags & VuiCtrlFlags_resizable) {
+		scroll_bar_length_vertical -= scroll_bar_width + VuiThickness_vertical(&scroll_bar_margin);
 	}
 
-    VuiBool show_vertical =
-		(state->flags & VuiScrollViewFlags_vertical_scroll) == VuiScrollViewFlags_vertical_scroll &&
-			((state->flags & VuiScrollViewFlags_always_show_vertical_bar) == VuiScrollViewFlags_always_show_vertical_bar ||
-				scroll_view_content_size.y < content_size.y);
-    VuiBool show_horizontal =
-		(state->flags & VuiScrollViewFlags_horizontal_scroll) == VuiScrollViewFlags_horizontal_scroll &&
-			((state->flags & VuiScrollViewFlags_always_show_horizontal_bar) == VuiScrollViewFlags_always_show_horizontal_bar ||
-				scroll_view_content_size.x < content_size.x);
+	//
+	// now setup the scroll bars and resize button if they are enabled.
+	//
+	VuiFocusState state = VuiFocusState_none;
+	VuiBool offset_changed = vui_false;
+	vui_scope_border_width(VuiCtrlState_default, scroll_bar_border_width)
+	vui_scope_border_color(VuiCtrlState_default, scroll_bar_border_color)
+	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
+	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+	vui_scope_radius(VuiCtrlState_default, scroll_bar_radius)
+	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
+	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
+	vui_scope_layout_wrap(VuiCtrlState_default, vui_false)
+	vui_scope_layout_spacing(VuiCtrlState_default, 0.f)
+	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 0.f)
+	vui_scope_bg_color(VuiCtrlState_default, scroll_bar_bg_color) {
+		if (show_horizontal_bar) {
+			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
+			vui_scope_align(VuiCtrlState_default, VuiAlign_left_bottom)
+				offset_changed = _vui_scroll_bar(-2, scroll_bar_width, scroll_bar_length_horizontal, container_size.x, &scroll_offset.x, content_size.x, vui_true);
+		}
 
-	if ((state->flags & VuiScrollViewFlags_resizable) != VuiScrollViewFlags_resizable && show_vertical && show_horizontal) {
-		scroll_view_content_size.x -= sb_width + state->sb_style->box.border.width;
-	}
+		if (show_vertical_bar) {
+			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
+			vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
+			offset_changed = _vui_scroll_bar(-3, scroll_bar_width, scroll_bar_length_vertical, container_size.y, &scroll_offset.y, content_size.y, vui_false);
+		}
 
-	if (show_vertical) {
-		// set the pos by aligning the scroll bar to the top right
-		vui_stack_layout_set_next_pos(VuiAlign_top_right, VuiVec2_zero);
-		vui_scroll_bar(2, scroll_view_content_size.y, &state->content_offset->y, content_size.y, vui_false, state->sb_style);
-		if (stack_layout_ctrl->rect.right_bottom.x == vui_auto_len) {
-			stack_layout_ctrl->max_right_bottom.x += vui_ctrl_get_last_size().x;
+		if (flags & VuiCtrlFlags_resizable) {
+			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
+			vui_scope_align(VuiCtrlState_default, VuiAlign_right_bottom)
+			vui_scope_width(VuiCtrlState_default, scroll_bar_width)
+			vui_scope_height(VuiCtrlState_default, scroll_bar_width) {
+				state = vui_button(-4);
+				if (state == VuiFocusState_held || state == VuiFocusState_pressed) {
+					VuiVec2 min;
+					min.x = (VuiThickness_horizontal(&scroll_bar_margin) + scroll_bar_border_width + scroll_view_border_width + scroll_bar_width) * 2;
+					min.y = (VuiThickness_vertical(&scroll_bar_margin) + scroll_bar_border_width + scroll_view_border_width + scroll_bar_width) * 2;
+
+					scroll_view_size.x += _vui.input.mouse.offset_x;
+					scroll_view_size.y += _vui.input.mouse.offset_y;
+					scroll_view_size = VuiVec2_max(min, scroll_view_size);
+				}
+			}
 		}
 	}
 
-	if (show_horizontal) {
-		// set the pos by aligning the scroll bar to the top right
-		vui_stack_layout_set_next_pos(VuiAlign_bottom_left, VuiVec2_zero);
-		vui_scroll_bar(3, scroll_view_content_size.x, &state->content_offset->x, content_size.x, vui_true, state->sb_style);
-		if (stack_layout_ctrl->rect.right_bottom.y == vui_auto_len) {
-			stack_layout_ctrl->max_right_bottom.y += vui_ctrl_get_last_size().y;
-		}
+	//
+	// now store the data back into the scroll view as it could have change
+	// if the use interacted the scroll view.
+	//
+	scroll_area = vui_ctrl_get(scroll_area_ctrl_id);
+	VuiCtrl_set_scroll_offset(scroll_area, scroll_offset, offset_changed);
+	scroll_area->scroll_view_size = scroll_view_size;
+	if ((vui_ctrl_is_mouse_scroll_focused(scroll_area->id) || state == VuiFocusState_held || state == VuiFocusState_pressed) && _vui.build.mouse_scroll_focused_size) {
+		*_vui.build.mouse_scroll_focused_size = scroll_view_size;
 	}
 
-	if ((state->flags & VuiScrollViewFlags_resizable) == VuiScrollViewFlags_resizable) {
-		VuiVec2 gap_size = VuiVec2_init(sb_width, sb_width);
-		vui_stack_layout_set_next_pos(VuiAlign_right_bottom, VuiVec2_zero);
-		if (vui_press_button_start(4, gap_size, &state->sb_style->slider)) {
-			float w = state->size->x;
-			float h = state->size->y;
-			w += _vui.input.mouse.offset_x;
-			h += _vui.input.mouse.offset_y;
-
-			VuiCtrl* ctrl = DasStk_get(&_vui.build.w->ctrls, _vui.build.parent_ctrl_idx);
-			float min = sb_width * 2 + state->sb_style->box.border.width;
-			float w_max = _vui.build.w->size.x - ctrl->rect.left_top.x;
-			float h_max = _vui.build.w->size.y - ctrl->rect.left_top.y;
-			if (stack_layout_ctrl->rect.right_bottom.x != vui_auto_len)
-				state->size->x = vui_clamp(w, min, w_max);
-			if (stack_layout_ctrl->rect.right_bottom.y != vui_auto_len)
-				state->size->y = vui_clamp(h, min, h_max);
-		}
-		vui_press_button_end();
-	}
-
-	// max content_size with the scroll_view_content_size so we only see values that express the content exceeding the scroll_view.
-	VuiVec2 min_content_offset = VuiVec2_scale(VuiVec2_sub(VuiVec2_max(content_size, scroll_view_content_size), scroll_view_content_size), -1.0);
-	*state->content_offset = VuiVec2_min(VuiVec2_zero, VuiVec2_max(*state->content_offset, min_content_offset));
-
-	vui_stack_layout_end(VuiVec2_zero);
-	vui_box_end();
+	vui_ctrl_end();
 }
-*/
 
 VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, _VuiInputBoxType type) {
 	VuiCtrlFlags flags = VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable;
@@ -2404,7 +2523,7 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 	if (VuiRect_intersects_pt(&_vui.render.clip_rect, mouse_pt)) {
 		if (ctrl->flags & VuiCtrlFlags_focusable) {
 			_vui_ctrl_set_mouse_focused(ctrl->id);
-		} else if (ctrl->flags & VuiCtrlFlags_scrollable) {
+		} else if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
 			_vui_ctrl_set_mouse_scroll_focused(ctrl->id);
 		}
 	}
@@ -2420,6 +2539,7 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 
 void vui_frame_start(VuiBool right_to_left) {
 	vui_assert(_vui.build.w == NULL, "cannot call vui_frame_start until vui_window_end has been called");
+	_VuiArenaAlctor_reset(&_vui.frame_data_alctor);
 
 	if (right_to_left) {
 		_vui.flags |= _VuiFlags_right_to_left;
@@ -2446,7 +2566,17 @@ void vui_frame_start(VuiBool right_to_left) {
 		VuiStk_clear(w->text);
 	}
 
-	_VuiArenaAlctor_reset(&_vui.frame_data_alctor);
+	//
+	// scroll the control that is scroll focused
+	//
+	if (_vui.mouse_scroll_focused_ctrl_id) {
+		VuiCtrl* scroll_focused_ctrl = vui_ctrl_get(_vui.mouse_scroll_focused_ctrl_id);
+		VuiVec2 scroll_offset = VuiVec2_init(
+			scroll_focused_ctrl->scroll_offset.x + _vui.input.mouse.wheel_offset_x,
+			scroll_focused_ctrl->scroll_offset.y + _vui.input.mouse.wheel_offset_y);
+		VuiCtrl_set_scroll_offset(scroll_focused_ctrl, scroll_offset, vui_false);
+	}
+
 
 	//
 	// process the keyboard input for the focused text/input box
@@ -2611,7 +2741,7 @@ void vui_frame_end() {
 			}
 		}
 
-		vui_ctrl_set_focused(ctrl ? ctrl->hash : 0);
+		vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 	} else if ((_vui.input.actions & VuiInputActions_focus_next) == VuiInputActions_focus_next) {
 		_VuiWindow* w = &_vui.windows[_vui.focused_window_id];
 		VuiCtrl* ctrl = vui_ctrl_get(w->focused_ctrl_id);
@@ -2644,7 +2774,7 @@ void vui_frame_end() {
 			ctrl = vui_ctrl_get(w->root_ctrl_id);
 		}
 
-		vui_ctrl_set_focused(ctrl ? ctrl->hash : 0);
+		vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 	}
 
 	_vui.input.mouse.offset_x = 0;
@@ -2678,7 +2808,7 @@ void vui_window_start(VuiWindowId id, VuiVec2 size) {
 		VuiCtrlId id = 0;
 		root_ctrl = _vui_ctrl_alloc(&id);
 		root_ctrl->id = id;
-		root_ctrl->hash = vui_fnv_hash_32_initial;
+		root_ctrl->sib_id = 1;
 		w->root_ctrl_id = id;
 	}
 	root_ctrl->last_frame_idx = _vui.build.frame_idx;
@@ -2741,6 +2871,7 @@ void _vui_layout_column_row(
 	float* fill_portion_wrap_dir_len_ptr = NULL;
 	float* max_dir_inner_len_ptr = NULL;
 	float* max_wrap_dir_inner_len_ptr = NULL;
+	float (*margin_dir_len)(const VuiThickness*) = NULL;
 	if (is_column) {
 		if (_vui.flags & _VuiFlags_right_to_left) {
 			dir_rect_len = VuiRect_neg_width;
@@ -2758,6 +2889,7 @@ void _vui_layout_column_row(
 		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_height;
 		max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
 		max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
+		margin_dir_len = VuiThickness_horizontal;
 	} else {
 		if (_vui.flags & _VuiFlags_right_to_left) {
 			wrap_dir_rect_len = VuiRect_neg_width;
@@ -2775,6 +2907,7 @@ void _vui_layout_column_row(
 		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_width;
 		max_dir_inner_len_ptr = &max_inner_right_bottom_ptr->y;
 		max_wrap_dir_inner_len_ptr = &max_inner_right_bottom_ptr->x;
+		margin_dir_len = VuiThickness_vertical;
 	}
 
 	//
@@ -2813,12 +2946,16 @@ void _vui_layout_column_row(
 		for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 			child = vui_ctrl_get(child_id);
 			float child_dir_len = child->attributes[dir_attr].float_;
-			if (child_dir_len < 0) { // is ratio
+			if (child_dir_len == vui_auto_len) {
+				continue;
+			} else if (child_dir_len == vui_fill_len) {
+				fill_ctrls_count += 1;
+			} else if (child_dir_len < 0) { // is ratio
 				// remove the ratio from the available_dir_len
 				float ratio = -child_dir_len;
 				available_dir_len -= inner_dir_len * ratio;
-			} else if (child_dir_len == vui_fill_len) {
-				fill_ctrls_count += 1;
+			} else {
+				available_dir_len -= child_dir_len + margin_dir_len(&child->attributes[VuiCtrlAttr_margin].thickness);
 			}
 		}
 
@@ -2854,32 +2991,40 @@ void _vui_layout_column_row(
 	while (child) {
 		VuiCtrl* child_line_start = child;
 		*fill_portion_wrap_dir_len_ptr = 0.f;
-		//
-		// loop until we have reached the end of the line and find the tallest control.
 		float max_wrap_dir_len = 0.0;
-		float end_dir_coord = 0.f;
-		VuiBool is_first = vui_true;
-		*child_placement_area_ptr = VuiRect_init_wh(dir_start, wrap_dir_start, 0, 0);
-		for (; child; child = child->sibling_next_id ? vui_ctrl_get(child->sibling_next_id) : NULL) {
-			_vui_layout_ctrls(child, child_placement_area_ptr, layout_inner_width, layout_inner_height);
-
-			// advance the length along the direction of the layout
-			end_dir_coord += dir_rect_len(&child->rect);
-
+		if (wrap || inner_wrap_dir_len == vui_auto_len) {
 			//
-			// wrap the control back around if it exceeds the wrap length.
-			if (wrap && !is_first && inner_dir_len < end_dir_coord) {
-				break;
-			}
-			is_first = vui_false;
+			// because we are wrapping or our wrap directional length is automatic.
+			// loop until we have reached the end of the line and find the tallest control.
+			float end_dir_coord = 0.f;
+			VuiBool is_first = vui_true;
+			*child_placement_area_ptr = VuiRect_init_wh(dir_start, wrap_dir_start, 0, 0);
+			for (; child; child = child->sibling_next_id ? vui_ctrl_get(child->sibling_next_id) : NULL) {
+				_vui_layout_ctrls(child, child_placement_area_ptr, layout_inner_width, layout_inner_height);
 
-			end_dir_coord += layout_spacing;
+				// advance the length along the direction of the layout
+				end_dir_coord += dir_rect_len(&child->rect);
 
-			// see if the height for this control is the tallest
-			float child_wrap_dir_len = wrap_dir_rect_len(&child->rect);
-			if (child_wrap_dir_len > max_wrap_dir_len) {
-				max_wrap_dir_len = child_wrap_dir_len;
+				//
+				// wrap the control back around if it exceeds the wrap length.
+				if (wrap && !is_first && inner_dir_len < end_dir_coord) {
+					break;
+				}
+				is_first = vui_false;
+
+				end_dir_coord += layout_spacing;
+
+				// see if the height for this control is the tallest
+				float child_wrap_dir_len = wrap_dir_rect_len(&child->rect);
+				if (child_wrap_dir_len > max_wrap_dir_len) {
+					max_wrap_dir_len = child_wrap_dir_len;
+				}
 			}
+		} else {
+			// because we are not wrapping and have a finite inner size.
+			// we can just use the inner_wrap_dir_len  as the max_wrap_dir_len.
+			max_wrap_dir_len = inner_wrap_dir_len;
+			child = NULL;
 		}
 
 		*fill_portion_wrap_dir_len_ptr = max_wrap_dir_len;
@@ -2958,6 +3103,8 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 
 	float parent_fill_portion_width = _vui.build.fill_portion_width;
 	float parent_fill_portion_height = _vui.build.fill_portion_height;
+	_vui.build.fill_portion_width = 0.f;
+	_vui.build.fill_portion_height = 0.f;
 
 	//
 	// while laying out the controls we use the rectangle as a relative
@@ -2985,6 +3132,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	float inner_y = margin->top + padding->top + border_width;
 	float inner_width = vui_auto_len;
 	float inner_height = vui_auto_len;
+
 	{
 		float width = ctrl->attributes[VuiCtrlAttr_width].float_;
 
@@ -2996,23 +3144,25 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 			if ((width == vui_fill_len || width < 0)) {
 				width = vui_auto_len;
 			}
-		} else {
-			if (width == vui_fill_len) {
-				width = parent_fill_portion_width;
-			} else if (width < 0) { // is ratio
-				float ratio = -width;
-				width = parent_inner_width * ratio;
-			}
 		}
 
 		if (width != vui_auto_len) {
-			float outer_width = width + (margin->left + margin->right);
+			float outer_width;
+			if (width == vui_fill_len) {
+				outer_width = parent_fill_portion_width;
+			} else if (width < 0) { // is ratio
+				float ratio = -width;
+				outer_width = parent_inner_width * ratio;
+			} else {
+				outer_width = width + (margin->left + margin->right);
+			}
+
 			if (_vui.flags & _VuiFlags_right_to_left) {
 				ctrl->rect.left = ctrl->rect.right + outer_width;
 			} else {
 				ctrl->rect.right = ctrl->rect.left + outer_width;
 			}
-			inner_width = width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
+			inner_width = outer_width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
 		}
 	}
 
@@ -3026,18 +3176,21 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 			if ((height == vui_fill_len || height < 0)) {
 				height = vui_auto_len;
 			}
-		} else {
-			if (height == vui_fill_len) {
-				height = parent_fill_portion_height;
-			} else if (height < 0) { // is ratio
-				float ratio = -height;
-				height = parent_inner_height * ratio;
-			}
 		}
 
 		if (height != vui_auto_len) {
-			ctrl->rect.bottom = ctrl->rect.top + height + (margin->top + margin->bottom);
-			inner_height = height - (margin->top + margin->bottom) - (padding->top + padding->bottom) - border_width * 2;
+			float outer_height;
+			if (height == vui_fill_len) {
+				outer_height = parent_fill_portion_height;
+			} else if (height < 0) { // is ratio
+				float ratio = -height;
+				outer_height = parent_inner_height * ratio;
+			} else {
+				outer_height = height + (margin->top + margin->bottom);
+			}
+
+			ctrl->rect.bottom = ctrl->rect.top + outer_height;
+			inner_height = outer_height - (margin->top + margin->bottom) - (padding->top + padding->bottom) - border_width * 2;
 		}
 	}
 
@@ -3088,6 +3241,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				}
 			}
 
+			if (inner_width != vui_auto_len) {
+				_vui.build.fill_portion_width = inner_width;
+			}
+
+			if (inner_height != vui_auto_len) {
+				_vui.build.fill_portion_height = inner_height;
+			}
+
 			VuiCtrl* child = NULL;
 			for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 				child = vui_ctrl_get(child_id);
@@ -3100,6 +3261,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 			}
 			break;
 		};
+	}
+
+	if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
+		VuiCtrl* content_ctrl = vui_ctrl_get(ctrl->scroll_content_id);
+		content_ctrl->rect.left += ctrl->scroll_offset.x;
+		content_ctrl->rect.right += ctrl->scroll_offset.x;
+		content_ctrl->rect.top += ctrl->scroll_offset.y;
+		content_ctrl->rect.bottom += ctrl->scroll_offset.y;
 	}
 
 	//
@@ -3199,6 +3368,69 @@ void _vui_layout_ctrls_finalize(VuiCtrl* ctrl, VuiVec2 offset, float root_width)
 	}
 }
 
+#if VUI_DEBUG_CTRL_LAYOUT
+
+void vui_dump_ctrls_indent(FILE* f, uint16_t indent_level) {
+	static char* tabs = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+	fprintf(f, "%.*s", indent_level, tabs);
+}
+
+void vui_dump_ctrls_(FILE* f, VuiCtrl* ctrl, uint16_t indent_level) {
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "######## Ctrl %u ########\n", ctrl->id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "sib_id: %u\n", ctrl->sib_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "parent_id: %u\n", ctrl->parent_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "child_first_id: %u\n", ctrl->child_first_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "child_last_id: %u\n", ctrl->child_last_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "sibling_prev_id: %u\n", ctrl->sibling_prev_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "sibling_next_id: %u\n", ctrl->sibling_next_id);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "last_frame_idx: %u\n", ctrl->last_frame_idx);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "rect: { left: %f, top: %f, right: %f, bottom: %f }\n", ctrl->rect.left, ctrl->rect.top, ctrl->rect.right, ctrl->rect.bottom);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "state_flags: 0x%x\n", ctrl->state_flags);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "layout_type: %s\n", VuiLayoutType_strings[ctrl->layout_type]);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "flags: 0x%lx\n", ctrl->flags);
+
+	vui_dump_ctrls_indent(f, indent_level);
+	fprintf(f, "scroll_offset: %f, %f\n", ctrl->scroll_offset.x, ctrl->scroll_offset.y);
+
+	VuiCtrl* child = NULL;
+	for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
+		child = vui_ctrl_get(child_id);
+		vui_dump_ctrls_(f, child, indent_level + 1);
+	}
+}
+
+void vui_dump_ctrls(VuiCtrl* root_ctrl) {
+	FILE* file = fopen(vui_debug_ctrl_layout_dump_file_path, "w");
+	vui_dump_ctrls_(file, root_ctrl, 0);
+	fflush(file);
+	fclose(file);
+}
+
+#endif // VUI_DEBUG_CTRL_LAYOUT
+
 void vui_window_end() {
 	vui_assert(_vui.build.w != NULL, "cannot call vui_window_end until vui_window_start has been called");
 
@@ -3223,6 +3455,10 @@ void vui_window_end() {
 		_vui_layout_ctrls_finalize(child, (VuiVec2){0}, root->attributes[VuiCtrlAttr_width].float_);
 	}
 
+#if VUI_DEBUG_CTRL_LAYOUT
+	vui_dump_ctrls(root);
+#endif
+
 	_vui.build.w = NULL;
 }
 
@@ -3236,7 +3472,21 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 	if (flags & VuiCtrlFlags_background) {
 		VuiColor color = ctrl->attributes[VuiCtrlAttr_bg_color].color;
 		float radius = ctrl->attributes[VuiCtrlAttr_radius].float_;
-		vui_render_rect(&ctrl->rect, color, radius);
+		if (flags & VuiCtrlFlags_border) {
+			float half_width = ctrl->attributes[VuiCtrlAttr_border_width].float_ / 2.f;
+			inner_rect.left += half_width;
+			inner_rect.top += half_width;
+			inner_rect.bottom -= half_width;
+			inner_rect.right -= half_width;
+		}
+		vui_render_rect(&inner_rect, color, radius);
+		if (flags & VuiCtrlFlags_border) {
+			float half_width = ctrl->attributes[VuiCtrlAttr_border_width].float_ / 2.f;
+			inner_rect.left -= half_width;
+			inner_rect.top -= half_width;
+			inner_rect.bottom += half_width;
+			inner_rect.right += half_width;
+		}
 	}
 
 	if (flags & VuiCtrlFlags_border) {
