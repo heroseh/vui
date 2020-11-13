@@ -975,6 +975,8 @@ void VuiStyle_init_default(VuiStyle* style) {
     VuiStyle_set_scroll_bar_slider_border_width(style, VuiCtrlState_default, 4.f);
     VuiStyle_set_scroll_bar_slider_border_color(style, VuiCtrlState_default, vui_color_alizarin);
     VuiStyle_set_scroll_bar_slider_bg_color(style, VuiCtrlState_default, vui_color_orange);
+
+	VuiStyle_set_progress_bar_color(style, VuiCtrlState_default, vui_color_alizarin);
 }
 
 // ===========================================================================================
@@ -2002,16 +2004,25 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	return state;
 }
 
-/*
-void vui_progress_bar(float value, float min, float max) {
+void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max) {
 	value = vui_clamp(value, min, max);
-	float ratio = (max - min) / (value - min);
+	float ratio = (value - min) / (max - min);
 
-	vui_ctrl_start(1, VuiCtrlFlags_background | VuiCtrlFlags_border);
+	vui_scope_layout_wrap(VuiCtrlState_default, vui_false)
+	vui_ctrl_start(sib_id, VuiCtrlFlags_background | VuiCtrlFlags_border, 0);
+		vui_column_layout();
+		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
+		VuiColor color = ctrl->attributes[VuiCtrlAttr_progress_bar_color].color;
+		vui_scope_width_ratio(VuiCtrlState_default, ratio)
+		vui_scope_height(VuiCtrlState_default, vui_fill_len)
+		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
+		vui_scope_bg_color(VuiCtrlState_default, color)
+		vui_ctrl_start(vui_sib_id, VuiCtrlFlags_background, 0);
+		vui_ctrl_end();
 	vui_ctrl_end();
 }
-*/
 
 void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_scroll_bar_slider) {
 	//

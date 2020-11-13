@@ -149,6 +149,13 @@ void build_ui() {
 	vui_scope_padding(VuiCtrlState_default, VuiThickness_init_even(4))
 	vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4))
 	vui_scope_box(vui_sib_id) {
+		vui_row_layout();
+
+		static float value = 0.f;
+		value += 0.1;
+		vui_scope_width(VuiCtrlState_default, 100.f)
+		vui_scope_height(VuiCtrlState_default, 50.f)
+		vui_progress_bar(vui_sib_id, value, 0.f, 100.f);
 
 		static VuiVec2 size = {500.f, 500.f};
 		static VuiVec2 offset = {50.f, 50.f};

@@ -519,6 +519,7 @@ enum {
     VuiCtrlAttr_scroll_bar_slider_border_width, // float
     VuiCtrlAttr_scroll_bar_slider_border_color, // VuiColor
     VuiCtrlAttr_scroll_bar_slider_bg_color, // VuiColor
+    VuiCtrlAttr_progress_bar_color, // VuiColor
     VuiCtrlAttr_COUNT,
 };
 
@@ -638,6 +639,9 @@ void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_s
 
 #define VuiStyle_set_scroll_bar_slider_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
 #define VuiStyle_unset_scroll_bar_slider_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state)
+
+#define VuiStyle_set_progress_bar_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_progress_bar_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
+#define VuiStyle_unset_progress_bar_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_progress_bar_color, ctrl_state)
 
 //
 // push and pop attributes for a given control state that override the global style
@@ -1092,9 +1096,18 @@ VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
 VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length);
 VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint);
 
-/*
-void vui_progress_bar(VuiVec2 size, float value, float min, float max, VuiProgressBarStyle* style);
-*/
+
+// ====================================================================================
+//
+//
+// Progress Bar
+//
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+// @param value: the value used to calculate the size of the progress meter.
+//               the value will start at @param(min) and end at @param(max).
+//
+void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max);
 
 // ====================================================================================
 //
