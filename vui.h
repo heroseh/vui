@@ -85,7 +85,7 @@ noreturn void _vui_abort(const char* file, int line, const char* func, char* ass
 static inline float vui_min(float a, float b) { return a < b ? a : b; }
 static inline float vui_max(float a, float b) { return a > b ? a : b; }
 static inline float vui_clamp(float v, float min, float max) { return v < min ? min : (v > max ? max : v); }
-static inline float vui_lerp(float a, float b, float t) { return (b - a) * t + a; }
+static inline float vui_lerp(float to, float from, float t) { return (to - from) * t + from; }
 
 #define vui_is_power_of_two(v) ((v) != 0) && (((v) & ((v) - 1)) == 0)
 
@@ -266,9 +266,17 @@ struct VuiColor {
 	uint8_t a;
 };
 #define VuiColor_init(r, g, b, a) ((VuiColor){r,g,b,a})
-#define VuiColor_white ((VuiColor){1.f, 1.f, 1.f, 1.f})
-#define VuiColor_black ((VuiColor){0.f, 0.f, 0.f, 1.f})
+#define VuiColor_white ((VuiColor){0xff, 0xff, 0xff, 0xff})
+#define VuiColor_black ((VuiColor){0, 0, 0, 0xff})
 #define VuiColor_transparent ((VuiColor){0})
+static inline VuiColor VuiColor_lerp(VuiColor to, VuiColor from, float interp_ratio) {
+	return VuiColor_init(
+		vui_lerp(to.r, from.r, interp_ratio),
+		vui_lerp(to.g, from.g, interp_ratio),
+		vui_lerp(to.b, from.b, interp_ratio),
+		vui_lerp(to.a, from.a, interp_ratio)
+	);
+}
 
 typedef union VuiVec4 VuiVec4;
 typedef VuiVec4 VuiRect;
@@ -305,12 +313,18 @@ union VuiVec4 {
 
 #define VuiVec4_init(x_, y_, z_, w_) ((VuiVec4){.x=x_, .y=y_, .z=z_, .w=w_})
 #define VuiThickness_zero ((VuiVec4){0})
-#define VuiThickness_init(left, top, right, bottom) ((VuiVec4){.left = left_, .top = top_, .right = right_, .bottom = bottom_})
+#define VuiThickness_init(left_, top_, right_, bottom_) ((VuiVec4){.left = left_, .top = top_, .right = right_, .bottom = bottom_})
 #define VuiThickness_init_even(size) ((VuiVec4){.left=size, .top=size, .right=size, .bottom=size})
 #define VuiThickness_hv_init(horizontal, vertical) ((VuiVec4){.left=horizontal, .top=vertical, .right=horizontal, .bottom=vertical})
 #define VuiThickness_hv(thickness) VuiVec2_init(((thickness).left + (thickness).right), (thickness).top + (thickness).bottom)
 static inline float VuiThickness_horizontal(const VuiThickness* thickness) { return thickness->left + thickness->right; }
 static inline float VuiThickness_vertical(const VuiThickness* thickness) { return thickness->top + thickness->bottom; }
+static inline void VuiThickness_lerp(VuiThickness* result, const VuiThickness* to, const VuiThickness* from, float interp_ratio) {
+	result->left = vui_lerp(to->left, from->left, interp_ratio);
+	result->top = vui_lerp(to->top, from->top, interp_ratio);
+	result->right = vui_lerp(to->right, from->right, interp_ratio);
+	result->bottom = vui_lerp(to->bottom, from->bottom, interp_ratio);
+}
 #define VuiRect_zero ((VuiVec4){0})
 #define VuiRect_init(left_, top_, right_, bottom_) ((VuiVec4){.left = left_, .top = top_, .right = right_, .bottom = bottom_})
 #define VuiRect_init_wh(left_, top_, width, height) ((VuiVec4){.left = left_, .top = top_, .right = (left_) + (width), .bottom = (top_) + (height)})
@@ -333,17 +347,17 @@ typedef uint32_t VuiCtrlId;
 typedef uint32_t VuiCtrlSibId;
 
 typedef enum {
-    VuiFocusState_none,
+    VuiFocusState_none = 0x0,
     // signals that the ctrl is mouse or keyboard focused
-    VuiFocusState_focused,
+    VuiFocusState_focused = 0x1,
     // signals has been pressed this frame
-    VuiFocusState_pressed,
+    VuiFocusState_pressed = 0x2,
     // signals has been double pressed this frame
-    VuiFocusState_double_pressed,
+    VuiFocusState_double_pressed = 0x4,
     // signals is being held this frame
-    VuiFocusState_held,
+    VuiFocusState_held = 0x8,
     // signals has been released this frame
-    VuiFocusState_released,
+    VuiFocusState_released = 0x10,
 } VuiFocusState;
 
 // ===========================================================================================
@@ -466,277 +480,135 @@ enum {
 	VuiImageScaleMode_none, // image is not scaled, the original size is used.
 };
 
+typedef struct VuiCtrlAttrs VuiCtrlAttrs;
+struct VuiCtrlAttrs {
+	float width;
+	float width_min;
+	float width_max;
+	float height;
+	float height_min;
+	float height_max;
+	float layout_spacing;
+	float layout_wrap_spacing;
+	VuiBool layout_wrap;
+	VuiVec2 offset;
+	VuiAlign align;
+	VuiImageScaleMode image_scale_mode;
+};
+
+typedef uint8_t VuiCtrlAttr;
+enum {
+	VuiCtrlAttr_width,
+	VuiCtrlAttr_width_min,
+	VuiCtrlAttr_width_max,
+	VuiCtrlAttr_height,
+	VuiCtrlAttr_height_min,
+	VuiCtrlAttr_height_max,
+	VuiCtrlAttr_offset,
+	VuiCtrlAttr_align,
+	VuiCtrlAttr_layout_spacing,
+	VuiCtrlAttr_layout_wrap_spacing,
+	VuiCtrlAttr_layout_wrap,
+    VuiCtrlAttr_image_scale_mode,
+    VuiCtrlAttr_COUNT,
+};
+
 typedef union VuiCtrlAttrValue VuiCtrlAttrValue;
 union VuiCtrlAttrValue {
 	float float_;
 	VuiVec2 vec2;
-	VuiThickness thickness;
-	VuiColor color;
-	VuiFontId font_id;
 	VuiAlign align;
 	VuiBool bool_;
 	VuiImageScaleMode image_scale_mode;
 };
 
-typedef uint64_t VuiCtrlAttrFlags; // VuiCtrlAttr -> VuiCtrlAttrFlags = (1 << VuiCtrlAttr_*)
-typedef uint8_t VuiCtrlAttr;
+typedef uint8_t VuiCtrlState;
 enum {
-    VuiCtrlAttr_margin, // VuiVec4.thickness
-    VuiCtrlAttr_padding, // VuiVec4.thickness
-	VuiCtrlAttr_width, // float
-	VuiCtrlAttr_width_min, // float
-	VuiCtrlAttr_width_max, // float
-	VuiCtrlAttr_height, // float
-	VuiCtrlAttr_height_min, // float
-	VuiCtrlAttr_height_max, // float
-	VuiCtrlAttr_offset, // VuiVec2
-	VuiCtrlAttr_align, // VuiAlign
-	VuiCtrlAttr_layout_spacing, // float
-	VuiCtrlAttr_layout_wrap_spacing, // float
-	VuiCtrlAttr_layout_wrap, // VuiBool
-    VuiCtrlAttr_bg_color, // VuiColor
-    VuiCtrlAttr_border_width, // VuiVec4.float
-    VuiCtrlAttr_border_color, // VuiColor
-	VuiCtrlAttr_radius, // VuiVec4.float
-    VuiCtrlAttr_text_color, // VuiColor
-    VuiCtrlAttr_check_color, // VuiColor
-    VuiCtrlAttr_check_size, // float
-    VuiCtrlAttr_separator_size, // float
-    VuiCtrlAttr_image_scale_mode, // VuiImageScaleMode
-	VuiCtrlAttr_text_font_id,
-	VuiCtrlAttr_text_height,
-    VuiCtrlAttr_text_selection_color, // VuiColor
-    VuiCtrlAttr_text_selection_radius, // VuiVec4.radius
-    VuiCtrlAttr_text_cursor_color, // VuiColor
-    VuiCtrlAttr_text_cursor_width, // float
-    VuiCtrlAttr_text_cursor_radius, // VuiVec4.radius
-    VuiCtrlAttr_scroll_bar_width, // float
-    VuiCtrlAttr_scroll_bar_border_width, // float
-    VuiCtrlAttr_scroll_bar_border_color, // VuiColor
-    VuiCtrlAttr_scroll_bar_bg_color, // VuiColor
-    VuiCtrlAttr_scroll_bar_radius, // float
-    VuiCtrlAttr_scroll_bar_margin, // VuiThickness
-    VuiCtrlAttr_scroll_bar_slider_border_width, // float
-    VuiCtrlAttr_scroll_bar_slider_border_color, // VuiColor
-    VuiCtrlAttr_scroll_bar_slider_bg_color, // VuiColor
-    VuiCtrlAttr_progress_bar_color, // VuiColor
-    VuiCtrlAttr_COUNT,
+	VuiCtrlState_default,
+	VuiCtrlState_focused,
+	VuiCtrlState_active,
+	VuiCtrlState_disabled,
+	VuiCtrlState_COUNT,
 };
 
 typedef uint8_t VuiCtrlStateFlags;
 enum {
-	VuiCtrlStateFlags_disabled = 0x1,
-	VuiCtrlStateFlags_active = 0x2,
-	VuiCtrlStateFlags_mouse_focused = 0x4,
-	VuiCtrlStateFlags_focused = 0x8,
-	VuiCtrlStateFlags_default = 0x10,
+	VuiCtrlStateFlags_default = 1 << VuiCtrlState_default,
+	VuiCtrlStateFlags_focused = 1 << VuiCtrlState_focused,
+	VuiCtrlStateFlags_active = 1 << VuiCtrlState_active,
+	VuiCtrlStateFlags_disabled = 1 << VuiCtrlState_disabled,
 };
-typedef uint8_t VuiCtrlState;
-enum {
-	VuiCtrlState_disabled,
-	VuiCtrlState_active,
-	VuiCtrlState_mouse_focused,
-	VuiCtrlState_focused,
-	VuiCtrlState_default,
-	VuiCtrlState_COUNT,
-};
-
-typedef struct VuiStyle VuiStyle;
-struct VuiStyle {
-	// used to tell if a state has a perticular style attribute set.
-	VuiCtrlAttrFlags state_attr_flags[VuiCtrlState_COUNT];
-	VuiCtrlAttrValue state_attr_values[VuiCtrlState_COUNT][VuiCtrlAttr_COUNT];
-};
-
-//
-// push and pop the global style.
-extern void vui_push_style(VuiStyle* style);
-extern void vui_pop_style();
-#define vui_scope_style(style) _vui_defer_loop(vui_push_style(style), vui_pop_style())
-
-//
-// set and unset attribute of a control state in a style
-void _VuiStyle_set_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state, VuiCtrlAttrValue value);
-void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state);
-
-#define VuiStyle_set_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_width, ctrl_state)
-
-#define VuiStyle_set_height(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_height, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_height(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_height, ctrl_state)
-
-#define VuiStyle_set_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_bg_color, ctrl_state)
-
-#define VuiStyle_set_border_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_border_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_border_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_border_width, ctrl_state)
-
-#define VuiStyle_set_border_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_border_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_border_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_border_color, ctrl_state)
-
-#define VuiStyle_set_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_radius, ctrl_state)
-
-#define VuiStyle_set_text_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_text_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_color, ctrl_state)
-
-#define VuiStyle_set_check_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_check_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_check_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_check_color, ctrl_state)
-
-#define VuiStyle_set_check_size(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_check_size, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_check_size(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_check_size, ctrl_state)
-
-#define VuiStyle_set_separator_size(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_separator_size, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_separator_size(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_separator_size, ctrl_state)
-
-#define VuiStyle_set_image_scale_mode(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_image_scale_mode, ctrl_state, (VuiCtrlAttrValue) { .image_scale_mode = value })
-#define VuiStyle_unset_image_scale_mode(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_image_scale_mode, ctrl_state)
-
-#define VuiStyle_set_text_font_id(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_font_id, ctrl_state, (VuiCtrlAttrValue) { .font_id = value })
-#define VuiStyle_unset_text_font_id(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_font_id, ctrl_state)
-
-#define VuiStyle_set_text_height(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_height, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_text_height(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_height, ctrl_state)
-
-#define VuiStyle_set_text_selection_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_selection_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_text_selection_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_selection_color, ctrl_state)
-
-#define VuiStyle_set_text_selection_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_selection_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_text_selection_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_selection_radius, ctrl_state)
-
-#define VuiStyle_set_text_cursor_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_cursor_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_text_cursor_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_cursor_color, ctrl_state)
-
-#define VuiStyle_set_text_cursor_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_cursor_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_text_cursor_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_cursor_width, ctrl_state)
-
-#define VuiStyle_set_text_cursor_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_text_cursor_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_text_cursor_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_text_cursor_radius, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_scroll_bar_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_width, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_border_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_border_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_scroll_bar_border_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_border_width, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_border_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_border_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_scroll_bar_border_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_border_color, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_scroll_bar_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_bg_color, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_radius(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_radius, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_scroll_bar_radius(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_radius, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_margin(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_margin, ctrl_state, (VuiCtrlAttrValue) { .thickness = value })
-#define VuiStyle_unset_scroll_bar_margin(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_margin, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_slider_border_width(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_border_width, ctrl_state, (VuiCtrlAttrValue) { .float_ = value })
-#define VuiStyle_unset_scroll_bar_slider_border_width(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_border_width, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_slider_border_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_border_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_scroll_bar_slider_border_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_border_color, ctrl_state)
-
-#define VuiStyle_set_scroll_bar_slider_bg_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_scroll_bar_slider_bg_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_scroll_bar_slider_bg_color, ctrl_state)
-
-#define VuiStyle_set_progress_bar_color(style, ctrl_state, value) _VuiStyle_set_attr(style, VuiCtrlAttr_progress_bar_color, ctrl_state, (VuiCtrlAttrValue) { .color = value })
-#define VuiStyle_unset_progress_bar_color(style, ctrl_state) _VuiStyle_unset_attr(style, VuiCtrlAttr_progress_bar_color, ctrl_state)
 
 //
 // push and pop attributes for a given control state that override the global style
-extern void _vui_push_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr, VuiCtrlAttrValue value);
-extern void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr);
+extern void _vui_push_ctrl_attr(VuiCtrlAttr attr, VuiCtrlAttrValue value);
+extern void _vui_pop_ctrl_attr(VuiCtrlAttr attr);
 
-#define vui_push_margin(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_margin, (VuiCtrlAttrValue) { .thickness = value })
-#define vui_pop_margin(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_margin)
-#define vui_scope_margin(ctrl_state, value) _vui_defer_loop(vui_push_margin(ctrl_state, value), vui_pop_margin(ctrl_state))
+#define vui_push_width(value) _vui_push_ctrl_attr(VuiCtrlAttr_width, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_width() _vui_pop_ctrl_attr(VuiCtrlAttr_width)
+#define vui_scope_width(value) _vui_defer_loop(vui_push_width(value), vui_pop_width())
+#define vui_push_width_ratio(value) vui_push_width(-(value))
+#define vui_pop_width_ratio() vui_pop_width()
+#define vui_scope_width_ratio(value) _vui_defer_loop(vui_push_width_ratio(value), vui_pop_width())
 
-#define vui_push_padding(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_padding, (VuiCtrlAttrValue) { .thickness = value })
-#define vui_pop_padding(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_padding)
-#define vui_scope_padding(ctrl_state, value) _vui_defer_loop(vui_push_padding(ctrl_state, value), vui_pop_padding(ctrl_state))
+#define vui_push_width_min(value) _vui_push_ctrl_attr(VuiCtrlAttr_width_min, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_width_min() _vui_pop_ctrl_attr(VuiCtrlAttr_width_min)
+#define vui_scope_width_min(value) _vui_defer_loop(vui_push_width_min(value), vui_pop_width_min())
+#define vui_push_width_min_ratio(value) vui_push_width_min(-(value))
+#define vui_pop_width_min_ratio() vui_pop_width_min()
+#define vui_scope_width_min_ratio(value) _vui_defer_loop(vui_push_width_min_ratio(value), vui_pop_width_min())
 
-#define vui_push_width(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_width, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_width(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_width)
-#define vui_scope_width(ctrl_state, value) _vui_defer_loop(vui_push_width(ctrl_state, value), vui_pop_width(ctrl_state))
-#define vui_push_width_ratio(ctrl_state, value) vui_push_width(ctrl_state, -(value))
-#define vui_pop_width_ratio(ctrl_state) vui_pop_width(ctrl_state, )
-#define vui_scope_width_ratio(ctrl_state, value) _vui_defer_loop(vui_push_width_ratio(ctrl_state, value), vui_pop_width(ctrl_state))
+#define vui_push_width_max(value) _vui_push_ctrl_attr(VuiCtrlAttr_width_max, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_width_max() _vui_pop_ctrl_attr(VuiCtrlAttr_width_max)
+#define vui_scope_width_max(value) _vui_defer_loop(vui_push_width_max(value), vui_pop_width_max())
+#define vui_push_width_max_ratio(value) vui_push_width_max(-(value))
+#define vui_pop_width_max_ratio() vui_pop_width_max()
+#define vui_scope_width_max_ratio(value) _vui_defer_loop(vui_push_width_max_ratio(value), vui_pop_width_max())
 
-#define vui_push_width_min(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_width_min, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_width_min(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_width_min)
-#define vui_scope_width_min(ctrl_state, value) _vui_defer_loop(vui_push_width_min(ctrl_state, value), vui_pop_width_min(ctrl_state))
-#define vui_push_width_min_ratio(ctrl_state, value) vui_push_width_min(ctrl_state, -(value))
-#define vui_pop_width_min_ratio(ctrl_state) vui_pop_width_min(ctrl_state, )
-#define vui_scope_width_min_ratio(ctrl_state, value) _vui_defer_loop(vui_push_width_min_ratio(ctrl_state, value), vui_pop_width_min(ctrl_state))
+#define vui_push_height(value) _vui_push_ctrl_attr(VuiCtrlAttr_height, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_height() _vui_pop_ctrl_attr(VuiCtrlAttr_height)
+#define vui_scope_height(value) _vui_defer_loop(vui_push_height(value), vui_pop_height())
+#define vui_push_height_ratio(value) vui_push_height(-(value))
+#define vui_pop_height_ratio() vui_pop_height()
+#define vui_scope_height_ratio(value) _vui_defer_loop(vui_push_height_ratio(value), vui_pop_height())
 
-#define vui_push_width_max(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_width_max, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_width_max(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_width_max)
-#define vui_scope_width_max(ctrl_state, value) _vui_defer_loop(vui_push_width_max(ctrl_state, value), vui_pop_width_max(ctrl_state))
-#define vui_push_width_max_ratio(ctrl_state, value) vui_push_width_max(ctrl_state, -(value))
-#define vui_pop_width_max_ratio(ctrl_state) vui_pop_width_max(ctrl_state, )
-#define vui_scope_width_max_ratio(ctrl_state, value) _vui_defer_loop(vui_push_width_max_ratio(ctrl_state, value), vui_pop_width_max(ctrl_state))
+#define vui_push_height_min(value) _vui_push_ctrl_attr(VuiCtrlAttr_height_min, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_height_min() _vui_pop_ctrl_attr(VuiCtrlAttr_height_min)
+#define vui_scope_height_min(value) _vui_defer_loop(vui_push_height_min(value), vui_pop_height_min())
+#define vui_push_height_min_ratio(value) vui_push_height_min(-(value))
+#define vui_pop_height_min_ratio() vui_pop_height_min()
+#define vui_scope_height_min_ratio(value) _vui_defer_loop(vui_push_height_min_ratio(value), vui_pop_height_min())
 
-#define vui_push_height(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_height, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_height(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_height)
-#define vui_scope_height(ctrl_state, value) _vui_defer_loop(vui_push_height(ctrl_state, value), vui_pop_height(ctrl_state))
-#define vui_push_height_ratio(ctrl_state, value) vui_push_height(ctrl_state, -(value))
-#define vui_pop_height_ratio(ctrl_state) vui_pop_height(ctrl_state, )
-#define vui_scope_height_ratio(ctrl_state, value) _vui_defer_loop(vui_push_height_ratio(ctrl_state, value), vui_pop_height(ctrl_state))
+#define vui_push_height_max(value) _vui_push_ctrl_attr(VuiCtrlAttr_height_max, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_height_max() _vui_pop_ctrl_attr(VuiCtrlAttr_height_max)
+#define vui_scope_height_max(value) _vui_defer_loop(vui_push_height_max(value), vui_pop_height_max())
+#define vui_push_height_max_ratio(value) vui_push_height_max(-(value))
+#define vui_pop_height_max_ratio() vui_pop_height_max()
+#define vui_scope_height_max_ratio(value) _vui_defer_loop(vui_push_height_max_ratio(value), vui_pop_height_max())
 
-#define vui_push_height_min(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_height_min, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_height_min(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_height_min)
-#define vui_scope_height_min(ctrl_state, value) _vui_defer_loop(vui_push_height_min(ctrl_state, value), vui_pop_height_min(ctrl_state))
-#define vui_push_height_min_ratio(ctrl_state, value) vui_push_height_min(ctrl_state, -(value))
-#define vui_pop_height_min_ratio(ctrl_state) vui_pop_height_min(ctrl_state, )
-#define vui_scope_height_min_ratio(ctrl_state, value) _vui_defer_loop(vui_push_height_min_ratio(ctrl_state, value), vui_pop_height_min(ctrl_state))
+#define vui_push_offset(x, y) _vui_push_ctrl_attr(VuiCtrlAttr_offset, (VuiCtrlAttrValue) { .vec2 = VuiVec2_init(x, y) })
+#define vui_pop_offset() _vui_pop_ctrl_attr(VuiCtrlAttr_offset)
+#define vui_scope_offset(x, y) _vui_defer_loop(vui_push_offset(x, y), vui_pop_offset())
 
-#define vui_push_height_max(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_height_max, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_height_max(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_height_max)
-#define vui_scope_height_max(ctrl_state, value) _vui_defer_loop(vui_push_height_max(ctrl_state, value), vui_pop_height_max(ctrl_state))
-#define vui_push_height_max_ratio(ctrl_state, value) vui_push_height_max(ctrl_state, -(value))
-#define vui_pop_height_max_ratio(ctrl_state) vui_pop_height_max(ctrl_state, )
-#define vui_scope_height_max_ratio(ctrl_state, value) _vui_defer_loop(vui_push_height_max_ratio(ctrl_state, value), vui_pop_height_max(ctrl_state))
+#define vui_push_align(value) _vui_push_ctrl_attr(VuiCtrlAttr_align, (VuiCtrlAttrValue) { .align = value })
+#define vui_pop_align() _vui_pop_ctrl_attr(VuiCtrlAttr_align)
+#define vui_scope_align(value) _vui_defer_loop(vui_push_align(value), vui_pop_align())
 
-#define vui_push_offset(ctrl_state, x, y) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_offset, (VuiCtrlAttrValue) { .vec2 = VuiVec2_init(x, y) })
-#define vui_pop_offset(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_offset)
-#define vui_scope_offset(ctrl_state, x, y) _vui_defer_loop(vui_push_offset(ctrl_state, x, y), vui_pop_offset(ctrl_state))
+#define vui_push_layout_spacing(value) _vui_push_ctrl_attr(VuiCtrlAttr_layout_spacing, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_layout_spacing() _vui_pop_ctrl_attr(VuiCtrlAttr_layout_spacing)
+#define vui_scope_layout_spacing(value) _vui_defer_loop(vui_push_layout_spacing(value), vui_pop_layout_spacing())
 
-#define vui_push_align(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_align, (VuiCtrlAttrValue) { .align = value })
-#define vui_pop_align(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_align)
-#define vui_scope_align(ctrl_state, value) _vui_defer_loop(vui_push_align(ctrl_state, value), vui_pop_align(ctrl_state))
+#define vui_push_layout_wrap_spacing(value) _vui_push_ctrl_attr(VuiCtrlAttr_layout_wrap_spacing, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_layout_wrap_spacing() _vui_pop_ctrl_attr(VuiCtrlAttr_layout_wrap_spacing)
+#define vui_scope_layout_wrap_spacing(value) _vui_defer_loop(vui_push_layout_wrap_spacing(value), vui_pop_layout_wrap_spacing())
 
-#define vui_push_layout_spacing(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_spacing, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_layout_spacing(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_spacing)
-#define vui_scope_layout_spacing(ctrl_state, value) _vui_defer_loop(vui_push_layout_spacing(ctrl_state, value), vui_pop_layout_spacing(ctrl_state))
+#define vui_push_layout_wrap(value) _vui_push_ctrl_attr(VuiCtrlAttr_layout_wrap, (VuiCtrlAttrValue) { .bool_ = value })
+#define vui_pop_layout_wrap() _vui_pop_ctrl_attr(VuiCtrlAttr_layout_wrap)
+#define vui_scope_layout_wrap(value) _vui_defer_loop(vui_push_layout_wrap(value), vui_pop_layout_wrap())
 
-#define vui_push_layout_wrap_spacing(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap_spacing, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_layout_wrap_spacing(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap_spacing)
-#define vui_scope_layout_wrap_spacing(ctrl_state, value) _vui_defer_loop(vui_push_layout_wrap_spacing(ctrl_state, value), vui_pop_layout_wrap_spacing(ctrl_state))
-
-#define vui_push_layout_wrap(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap, (VuiCtrlAttrValue) { .bool_ = value })
-#define vui_pop_layout_wrap(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_layout_wrap)
-#define vui_scope_layout_wrap(ctrl_state, value) _vui_defer_loop(vui_push_layout_wrap(ctrl_state, value), vui_pop_layout_wrap(ctrl_state))
-
-#define vui_push_image_scale_mode(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_image_scale_mode, (VuiCtrlAttrValue) { .image_scale_mode = value })
-#define vui_pop_image_scale_mode(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_image_scale_mode)
-#define vui_scope_image_scale_mode(ctrl_state, value) _vui_defer_loop(vui_push_image_scale_mode(ctrl_state, value), vui_pop_image_scale_mode(ctrl_state))
-
-#define vui_push_bg_color(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_bg_color, (VuiCtrlAttrValue) { .color = value })
-#define vui_pop_bg_color(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_bg_color)
-#define vui_scope_bg_color(ctrl_state, value) _vui_defer_loop(vui_push_bg_color(ctrl_state, value), vui_pop_bg_color(ctrl_state))
-
-#define vui_push_radius(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_radius, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_radius(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_radius)
-#define vui_scope_radius(ctrl_state, value) _vui_defer_loop(vui_push_radius(ctrl_state, value), vui_pop_radius(ctrl_state))
-
-#define vui_push_border_width(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_border_width, (VuiCtrlAttrValue) { .float_ = value })
-#define vui_pop_border_width(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_border_width)
-#define vui_scope_border_width(ctrl_state, value) _vui_defer_loop(vui_push_border_width(ctrl_state, value), vui_pop_border_width(ctrl_state))
-
-#define vui_push_border_color(ctrl_state, value) _vui_push_ctrl_attr(ctrl_state, VuiCtrlAttr_border_color, (VuiCtrlAttrValue) { .color = value })
-#define vui_pop_border_color(ctrl_state) _vui_pop_ctrl_attr(ctrl_state, VuiCtrlAttr_border_color)
-#define vui_scope_border_color(ctrl_state, value) _vui_defer_loop(vui_push_border_color(ctrl_state, value), vui_pop_border_color(ctrl_state))
+#define vui_push_image_scale_mode(value) _vui_push_ctrl_attr(VuiCtrlAttr_image_scale_mode, (VuiCtrlAttrValue) { .image_scale_mode = value })
+#define vui_pop_image_scale_mode() _vui_pop_ctrl_attr(VuiCtrlAttr_image_scale_mode)
+#define vui_scope_image_scale_mode(value) _vui_defer_loop(vui_push_image_scale_mode(value), vui_pop_image_scale_mode())
 
 typedef uint64_t VuiCtrlFlags;
 enum {
@@ -746,13 +618,9 @@ enum {
 	VuiCtrlFlags_scrollable_horizontal = 0x8,
 	VuiCtrlFlags_scrollable_horizontal_always_show = 0x10,
 	VuiCtrlFlags_resizable = 0x20,
-	VuiCtrlFlags_background = 0x40,
-	VuiCtrlFlags_border = 0x80,
 	VuiCtrlFlags_pressable = 0x100,
 	VuiCtrlFlags_toggleable = 0x200,
 	VuiCtrlFlags_selectable = 0x400,
-	_VuiCtrlFlags_image = 0x800,
-	_VuiCtrlFlags_text = 0x1000,
 	_VuiCtrlFlags_show_vertical_bar = 0x2000,
 	_VuiCtrlFlags_show_horizontal_bar = 0x4000,
 };
@@ -765,8 +633,10 @@ enum {
 };
 extern char* VuiLayoutType_strings[];
 
-typedef void (*VuiCtrlRenderFn)();
 typedef struct VuiCtrl VuiCtrl;
+typedef struct VuiCtrlStyle VuiCtrlStyle;
+typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect);
+typedef void (*VuiCtrlStyleInterpFn)(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
 struct VuiCtrl {
 	VuiCtrlId id;
 	VuiCtrlId parent_id;
@@ -784,6 +654,12 @@ struct VuiCtrl {
 	VuiCtrlFlags flags;
 	VuiCtrlRenderFn render_fn;
 	VuiVec2 scroll_offset;
+
+	VuiCtrlStyleInterpFn style_interp_fn;
+	const VuiCtrlStyle* style;
+	const VuiCtrlStyle* target_style;
+	float interp_ratio;
+
 	union {
 		struct {
 			VuiImageId image_id;
@@ -798,8 +674,161 @@ struct VuiCtrl {
 			VuiVec2 scroll_view_size;
 		};
 	};
-	VuiCtrlAttrValue attributes[VuiCtrlAttr_COUNT];
+	VuiCtrlAttrs attributes;
 };
+
+extern VuiCtrlState VuiCtrl_state(VuiCtrl* ctrl);
+extern void VuiCtrl_target_style(VuiCtrl* ctrl, const VuiCtrlStyle* target_style);
+extern VuiThickness VuiCtrl_interp_margin(VuiCtrl* ctrl);
+extern VuiThickness VuiCtrl_interp_padding(VuiCtrl* ctrl);
+
+#define inline_VuiCtrlStyle \
+	struct { \
+		VuiThickness margin; \
+		VuiThickness padding; \
+		VuiColor bg_color; \
+		VuiColor border_color; \
+		float border_width; \
+		float radius; \
+	}
+
+struct VuiCtrlStyle {
+	inline_VuiCtrlStyle;
+};
+
+extern void VuiCtrlStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiTextStyle VuiTextStyle;
+struct VuiTextStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	VuiFontId font_id;
+	VuiColor color;
+	float line_height;
+};
+
+extern void VuiTextStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiSeparatorStyle VuiSeparatorStyle;
+struct VuiSeparatorStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	float size;
+};
+
+extern void VuiSeparatorStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+#define inline_VuiButtonStyle \
+	struct { \
+		union { \
+			inline_VuiCtrlStyle; \
+			VuiCtrlStyle ctrl; \
+		}; \
+		const VuiCtrlStyle* image_style; \
+		const VuiTextStyle* text_style; \
+	}
+
+typedef struct VuiButtonStyle VuiButtonStyle;
+struct VuiButtonStyle {
+	inline_VuiButtonStyle;
+};
+
+extern void VuiButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiCheckBoxStyle VuiCheckBoxStyle;
+struct VuiCheckBoxStyle {
+	union {
+		inline_VuiButtonStyle;
+		VuiButtonStyle button;
+	};
+	VuiColor check_color;
+	float check_size;
+};
+
+extern void VuiCheckBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiRadioButtonStyle VuiRadioButtonStyle;
+struct VuiRadioButtonStyle {
+	union {
+		inline_VuiButtonStyle;
+		VuiButtonStyle button;
+	};
+	VuiColor check_color;
+	float check_size;
+};
+
+extern void VuiRadioButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiProgressBarStyle VuiProgressBarStyle;
+struct VuiProgressBarStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	VuiColor bar_color;
+};
+
+extern void VuiProgressBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiScrollBarStyle VuiScrollBarStyle;
+struct VuiScrollBarStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	const VuiButtonStyle* slider_style; // points to an array of styles, one for for each VuiCtrlState value
+	float width;
+};
+
+extern void VuiScrollBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiScrollViewStyle VuiScrollViewStyle;
+struct VuiScrollViewStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	const VuiScrollBarStyle* bar_style;
+};
+
+extern void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+typedef struct VuiTextBoxStyle VuiTextBoxStyle;
+struct VuiTextBoxStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	const VuiTextStyle* text_style;
+	VuiColor selection_color;
+	VuiColor cursor_color;
+	float cursor_width;
+};
+
+extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
+// ===========================================================================================
+//
+//
+// Default Style
+//
+//
+// ===========================================================================================
+
+#define vui_margin_default VuiThickness_init_even(4.f)
+#define vui_padding_default VuiThickness_init_even(4.f)
+#define vui_border_width_default 2.f
+#define vui_radius_default 4.f
+#define vui_line_height_header 32.f
+#define vui_line_height_menu 32.f
+#define vui_scroll_bar_width_default 24.f
+#define vui_separator_size_default 4.f
+#define vui_check_size_default 20.f
+#define vui_cursor_width_default 2.f
 
 #define vui_color_white VuiColor_init(0xfa, 0xfa, 0xfa, 0xff)
 #define vui_color_gray VuiColor_init(0xbd, 0xbd, 0xbd, 0xff)
@@ -829,7 +858,29 @@ struct VuiCtrl {
 #define vui_color_wet_asphalt VuiColor_init(0x34, 0x49, 0x5e, 0xff)
 #define vui_color_midnight_blue VuiColor_init(0x2c, 0x3e, 0x50, 0xff)
 
-void VuiStyle_init_default(VuiStyle* style);
+typedef struct {
+	VuiCtrlStyle image;
+	VuiCtrlStyle box_panel;
+	VuiTextStyle text_header;
+	VuiTextStyle text_menu;
+	VuiSeparatorStyle separator;
+	VuiButtonStyle button_action[VuiCtrlState_COUNT];
+	VuiButtonStyle button_confirm[VuiCtrlState_COUNT];
+	VuiButtonStyle button_deny[VuiCtrlState_COUNT];
+	VuiButtonStyle button_info[VuiCtrlState_COUNT];
+	VuiButtonStyle toggle_button[VuiCtrlState_COUNT];
+	VuiButtonStyle select_button[VuiCtrlState_COUNT];
+	VuiCheckBoxStyle check_box[VuiCtrlState_COUNT];
+	VuiRadioButtonStyle radio_button[VuiCtrlState_COUNT];
+	VuiProgressBarStyle progress_bar;
+	VuiTextBoxStyle text_box[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_box_selection;
+	VuiCtrlStyle text_box_cursor;
+	VuiScrollViewStyle scroll_view;
+	VuiScrollBarStyle scroll_bar;
+	VuiButtonStyle scroll_bar_slider[VuiCtrlState_COUNT];
+} VuiStyleSheet;
+extern VuiStyleSheet vui_ss;
 
 // ===========================================================================================
 //
@@ -868,29 +919,29 @@ typedef struct {
     uint64_t hash;
 } VuiWindowRender;
 
-void vui_render_line(VuiVec2 start_pos, VuiVec2 end_pos, VuiColor color, float width);
-void vui_render_rect(const VuiRect* rect, VuiColor color, float radius);
-void vui_render_rect_border(const VuiRect* rect, VuiColor color, float radius, float width);
-void vui_render_triangle(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color);
-void vui_render_triangle_border(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color, float width);
-void vui_render_circle(VuiVec2 pos, float radius, VuiColor color);
-void vui_render_circle_border(VuiVec2 pos, float radius, VuiColor color, float width);
-void vui_render_text(VuiVec2 pos, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width);
-void vui_render_polyline(VuiVec2* points, uint32_t points_count, VuiColor color, float width, VuiBool connect_first_and_last);
-void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
-void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_anchor_pos, VuiVec2 end_anchor_pos, VuiColor color, float width);
+extern void vui_render_line(VuiVec2 start_pos, VuiVec2 end_pos, VuiColor color, float width);
+extern void vui_render_rect(const VuiRect* rect, VuiColor color, float radius);
+extern void vui_render_rect_border(const VuiRect* rect, VuiColor color, float radius, float width);
+extern void vui_render_triangle(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color);
+extern void vui_render_triangle_border(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color, float width);
+extern void vui_render_circle(VuiVec2 pos, float radius, VuiColor color);
+extern void vui_render_circle_border(VuiVec2 pos, float radius, VuiColor color, float width);
+extern void vui_render_text(VuiVec2 pos, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width);
+extern void vui_render_polyline(VuiVec2* points, uint32_t points_count, VuiColor color, float width, VuiBool connect_first_and_last);
+extern void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
+extern void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_anchor_pos, VuiVec2 end_anchor_pos, VuiColor color, float width);
 
-void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode);
-void vui_render_image_(const VuiRect* rect, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph);
+extern void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode);
+extern void vui_render_image_(const VuiRect* rect, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph);
 
-void vui_path_reset();
-void vui_path_plot_point(VuiVec2 pt);
-void vui_path_plot_arc(VuiVec2 pt, float radius, float angle_start, float angle_end, uint32_t segments_count);
-void vui_path_plot_bezier_curve(VuiVec2 start_control_pt, VuiVec2 end_control_pt, VuiVec2 end_pt);
-void vui_path_plot_rect(const VuiRect* rect, float radius);
-void vui_path_plot_circle(VuiVec2 pt, float radius, VuiBool is_border);
-void vui_render_path_stroked(VuiColor color, float width, VuiBool connect_first_and_last);
-void vui_render_path_filled_convex(VuiColor color);
+extern void vui_path_reset();
+extern void vui_path_plot_point(VuiVec2 pt);
+extern void vui_path_plot_arc(VuiVec2 pt, float radius, float angle_start, float angle_end, uint32_t segments_count);
+extern void vui_path_plot_bezier_curve(VuiVec2 start_control_pt, VuiVec2 end_control_pt, VuiVec2 end_pt);
+extern void vui_path_plot_rect(const VuiRect* rect, float radius);
+extern void vui_path_plot_circle(VuiVec2 pt, float radius, VuiBool is_border);
+extern void vui_render_path_stroked(VuiColor color, float width, VuiBool connect_first_and_last);
+extern void vui_render_path_filled_convex(VuiColor color);
 
 typedef struct {
 	VuiVertex* verts;
@@ -898,9 +949,9 @@ typedef struct {
 	uint32_t verts_start_idx;
 } VuiRenderWriter;
 
-VuiRenderWriter vui_render_get_writer(VuiTextureId texture_id, uint32_t verts_count, uint32_t indices_count);
-void vui_render_inc_layer();
-void vui_render_dec_layer();
+extern VuiRenderWriter vui_render_get_writer(VuiTextureId texture_id, uint32_t verts_count, uint32_t indices_count);
+extern void vui_render_inc_layer();
+extern void vui_render_dec_layer();
 
 // ====================================================================================
 //
@@ -915,10 +966,9 @@ void vui_render_dec_layer();
 // the enum count must be passed into the vui_init
 typedef uint16_t VuiWindowId;
 
-void vui_container_layout();
-void vui_stack_layout();
-void vui_column_layout();
-void vui_row_layout();
+extern void vui_stack_layout();
+extern void vui_column_layout();
+extern void vui_row_layout();
 
 typedef uint8_t VuiActiveChange;
 enum {
@@ -927,20 +977,16 @@ enum {
 	VuiActiveChange_to_active = vui_true + 1,
 };
 
-VuiCtrl* vui_ctrl_get(VuiCtrlId ctrl_id);
-void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change);
-void vui_ctrl_end();
-
-// ====================================================================================
-//
-//
-// Box
-//
-//
-void vui_box_start(VuiCtrlSibId sib_id);
-void vui_box_end();
-void vui_box(VuiCtrlSibId sib_id);
-#define vui_scope_box(sib_id) _vui_defer_loop(vui_box_start(sib_id), vui_box_end())
+extern VuiCtrl* vui_ctrl_get(VuiCtrlId ctrl_id);
+extern VuiCtrl* vui_ctrl_try_get(VuiCtrlId ctrl_id);
+#define vui_ctrl_start(sib_id, style) vui_ctrl_start_(sib_id, 0, 0, style, VuiCtrlStyle_interp, NULL)
+extern void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change, const VuiCtrlStyle* style, VuiCtrlStyleInterpFn style_interp_fn, VuiCtrlRenderFn render_fn);
+extern void vui_ctrl_end();
+static inline void vui_ctrl(VuiCtrlSibId sib_id, const VuiCtrlStyle* style) {
+	vui_ctrl_start(sib_id, style);
+	vui_ctrl_end();
+}
+#define vui_scope_ctrl(sib_id, style) _vui_defer_loop(vui_ctrl_start(sib_id, style), vui_ctrl_end())
 
 // ====================================================================================
 //
@@ -951,8 +997,9 @@ void vui_box(VuiCtrlSibId sib_id);
 // @param text: the text to be displayed
 // @param text_length: the length of text in bytes
 // @param wrap_at_width = 0.0 to not have word wrapping
-#define vui_text(sib_id, text, wrap_at_width) vui_text_(sib_id, text, strlen(text), wrap_at_width)
-void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width);
+//
+#define vui_text(sib_id, text, wrap_at_width, style) vui_text_(sib_id, text, strlen(text), wrap_at_width, style)
+extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width, const VuiTextStyle* style);
 
 // ====================================================================================
 //
@@ -964,10 +1011,10 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 // @param image_tint: the color to be multiplied with the image pixels.
 //                    can be used to make the image transparent or reduce a certain color channel.
 //                    to show the image unchanged, provide a value of vui_color_white.
-void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
+extern void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle* style);
 
-void vui_spacing(VuiCtrlSibId sib_id, float width, float height);
-void vui_separator(VuiCtrlSibId sib_id);
+extern void vui_spacing(VuiCtrlSibId sib_id, float width, float height);
+extern void vui_separator(VuiCtrlSibId sib_id, const VuiSeparatorStyle* style);
 
 // ====================================================================================
 //
@@ -979,14 +1026,14 @@ void vui_separator(VuiCtrlSibId sib_id);
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-VuiFocusState vui_button_start(VuiCtrlSibId sib_id);
-void vui_button_end();
-VuiFocusState vui_button(VuiCtrlSibId sib_id);
-#define vui_text_button(sib_id, text) vui_text_button_(sib_id, text, strlen(text))
-VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length);
-VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint);
-#define vui_image_text_button(sib_id, image_id, image_tint, text) vui_image_text_button_(sib_id, image_id, image_tint, text, strlen(text))
-VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
+extern VuiFocusState vui_button_start(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern void vui_button_end();
+extern VuiFocusState vui_button(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+#define vui_text_button(sib_id, text, styles) vui_text_button_(sib_id, text, strlen(text), styles)
+extern VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+#define vui_image_text_button(sib_id, image_id, image_tint, text, styles) vui_image_text_button_(sib_id, image_id, image_tint, text, strlen(text), styles)
+extern VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1001,13 +1048,13 @@ VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, V
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed);
+extern VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
 void vui_toggle_button_end();
-#define vui_text_toggle_button(sib_id, pressed, text) vui_text_toggle_button_(sib_id, pressed, text, strlen(text))
-VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length);
-VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint);
-#define vui_image_text_toggle_button(sib_id, pressed, image_id, image_tint, text) vui_image_text_toggle_button_(sib_id, pressed, image_id, image_tint, text, strlen(text))
-VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
+#define vui_text_toggle_button(sib_id, pressed, text, styles) vui_text_toggle_button_(sib_id, pressed, text, strlen(text), styles)
+extern VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+#define vui_image_text_toggle_button(sib_id, pressed, image_id, image_tint, text, styles) vui_image_text_toggle_button_(sib_id, pressed, image_id, image_tint, text, strlen(text), styles)
+extern VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1050,14 +1097,14 @@ VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, Vui
 //     // do something with enum_value
 // }
 //
-VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
-void vui_select_button_end();
-#define vui_text_select_button(sib_id, selected_sib_id, text) vui_text_select_button_(sib_id, selected_sib_id, text, strlen(text))
-VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length);
-VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint);
-#define vui_image_text_select_button(sib_id, selected_sib_id, image_id, image_tint, text) \
-	vui_image_text_select_button_(sib_id, selected_sib_id, image_id, image_tint, text, strlen(text))
-VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length);
+extern VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern void vui_select_button_end();
+#define vui_text_select_button(sib_id, selected_sib_id, text, styles) vui_text_select_button_(sib_id, selected_sib_id, text, strlen(text), styles)
+extern VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+#define vui_image_text_select_button(sib_id, selected_sib_id, image_id, image_tint, text, styles) \
+	vui_image_text_select_button_(sib_id, selected_sib_id, image_id, image_tint, text, strlen(text), styles)
+extern VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1073,10 +1120,10 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 // @param image_id, image_tint: see vui_image
 //
 //
-VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked);
-#define vui_text_check_box(sib_id, checked, text) vui_text_check_box_(sib_id, checked, text, strlen(text))
-VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length);
-VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint);
+extern VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
+#define vui_text_check_box(sib_id, checked, text, styles) vui_text_check_box_(sib_id, checked, text, strlen(text), styles)
+extern VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1091,10 +1138,10 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id);
-#define vui_text_radio_button(sib_id, selected_sib_id, text) vui_text_radio_button_(sib_id, selected_sib_id, text, strlen(text))
-VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length);
-VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint);
+extern VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
+#define vui_text_radio_button(sib_id, selected_sib_id, text, styles) vui_text_radio_button_(sib_id, selected_sib_id, text, strlen(text), styles)
+extern VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
 
 
 // ====================================================================================
@@ -1107,7 +1154,7 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 // @param value: the value used to calculate the size of the progress meter.
 //               the value will start at @param(min) and end at @param(max).
 //
-void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max);
+extern void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiProgressBarStyle* style);
 
 // ====================================================================================
 //
@@ -1122,10 +1169,10 @@ void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max);
 //
 // @param value: the pointer to the value that will be presented in the text box and written back out when modified.
 //
-VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap);
-VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value);
-VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value);
-VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value);
+extern VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
 
 typedef uint8_t VuiScrollFlags;
 //
@@ -1159,21 +1206,26 @@ enum {
 //
 // @param flags: binary OR the values of VuiScrollFlags to enable features of the scroll view.
 //
-//    VuiScrollFlags_vertical:                enables vertical scrolling capabilities and will show a scroll bar when needed
+//    VuiScrollFlags_vertical:
+//        enables vertical scrolling capabilities and will show a scroll bar when needed
 //
-//    VuiScrollFlags_vertical_always_show:    if vertical scrolling is enabled, then the scroll bar will always show
+//    VuiScrollFlags_vertical_always_show:
+//        if vertical scrolling is enabled, then the scroll bar will always show
 //
-//    VuiScrollFlags_horizontal:              enables horizontal scrolling capabilities and will show a scroll bar when needed
+//    VuiScrollFlags_horizontal:
+//        enables horizontal scrolling capabilities and will show a scroll bar when needed
 //
-//    VuiScrollFlags_horizontal_always_show:  if horizontal scrolling is enabled, then the scroll bar will always show
+//    VuiScrollFlags_horizontal_always_show:
+//        if horizontal scrolling is enabled, then the scroll bar will always show
 //
-//    VuiScrollFlags_resizable:               allow you to resize the scroll view. if this is enabled then the width and height style attributes
-//                                            only initialize the size and do not change the size on future calls.
-//                                            unless the scroll view is not executed one frame and then reinitialized later.
+//    VuiScrollFlags_resizable:
+//        allow you to resize the scroll view. if this is enabled then the width and height style attributes
+//        only initialize the size and do not change the size on future calls.
+//        unless the scroll view is not executed one frame and then reinitialized later.
 //
-#define vui_scroll_view_start(sib_id, flags) vui_scroll_view_start_(sib_id, NULL, NULL, flags)
-void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags);
-void vui_scroll_view_end();
+#define vui_scroll_view_start(sib_id, flags, style) vui_scroll_view_start_(sib_id, NULL, NULL, flags, style)
+extern void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiScrollViewStyle* style);
+extern void vui_scroll_view_end();
 
 /*
 
@@ -1198,14 +1250,14 @@ typedef struct {
 	VuiRect uv_rect;
 } VuiImage;
 
-VuiImageId vui_image_add(VuiImage* image);
-VuiImage* vui_image_get(VuiImageId image_id);
-void vui_image_remove(VuiImageId image_id);
+extern VuiImageId vui_image_add(VuiImage* image);
+extern VuiImage* vui_image_get(VuiImageId image_id);
+extern void vui_image_remove(VuiImageId image_id);
 
 typedef uint16_t VuiViewportId;
 
 typedef void (*VuiRenderGlyphFn)(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect);
-typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
+typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
 typedef void (*VuiTextBoxFocusChange)(VuiBool focused);
 
 typedef struct {
@@ -1214,27 +1266,25 @@ typedef struct {
 	VuiTextBoxFocusChange text_box_focus_change_fn;
 	uint16_t windows_count;
 	void* allocator;
-	VuiStyle* style;
 } VuiSetup;
 
-VuiBool vui_init(VuiSetup* setup);
+extern VuiBool vui_init(VuiSetup* setup);
 
-void vui_frame_start(VuiBool right_to_left);
-void vui_frame_end();
+extern void vui_frame_start(VuiBool right_to_left);
+extern void vui_frame_end();
 
-void vui_window_start(VuiWindowId id, VuiVec2 size);
-void vui_window_end();
+extern void vui_window_start(VuiWindowId id, VuiVec2 size);
+extern void vui_window_end();
 
-VuiWindowRender* vui_window_render(VuiWindowId id, float scale_factor, VuiBool pixel_snapping);
-void vui_window_set_mouse_focused(VuiWindowId id);
-void vui_window_set_focused(VuiWindowId id);
+extern VuiWindowRender* vui_window_render(VuiWindowId id, float scale_factor, VuiBool pixel_snapping);
+extern void vui_window_set_mouse_focused(VuiWindowId id);
+extern void vui_window_set_focused(VuiWindowId id);
 
-void vui_window_dump_render(VuiWindowId id, FILE* file);
+extern void vui_window_dump_render(VuiWindowId id, FILE* file);
 
 // allocate zeroed memory that is cleared at the end of the frame.
-// useful if you need to make things like styles for child controls.
 #define vui_frame_data_alloc_elmt(T) (T*)vui_frame_data_alloc(sizeof(T), alignof(T));
-void* vui_frame_data_alloc(uint32_t size, uint32_t align);
+extern void* vui_frame_data_alloc(uint32_t size, uint32_t align);
 
 #endif // VUI_H
 

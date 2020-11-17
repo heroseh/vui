@@ -143,60 +143,134 @@ void build_ui() {
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 	vui_row_layout();
 
-	vui_scope_layout_wrap(VuiCtrlState_default, vui_true)
-	vui_scope_layout_spacing(VuiCtrlState_default, 6.f)
-	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 20.f)
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_init_even(4))
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_init_even(4))
-	vui_scope_box(vui_sib_id) {
-		vui_row_layout();
+	static VuiVec2 size = {0};
+	static VuiVec2 offset = {50.f, 50.f};
+	vui_scope_width(vui_fill_len)
+	vui_scope_height(vui_fill_len)
+	vui_scroll_view_start(vui_sib_id,
+		VuiScrollFlags_vertical |
+		VuiScrollFlags_resizable |
+		VuiScrollFlags_horizontal,
+		&vui_ss.scroll_view);
 
-		static float value = 0.f;
-		value += 0.1;
-		vui_scope_width(VuiCtrlState_default, 100.f)
-		vui_scope_height(VuiCtrlState_default, 50.f)
-		vui_progress_bar(vui_sib_id, value, 0.f, 100.f);
-
-		static VuiVec2 size = {500.f, 500.f};
-		static VuiVec2 offset = {50.f, 50.f};
-		vui_scope_width(VuiCtrlState_default, 500.f)
-		vui_scope_height(VuiCtrlState_default, 500.f)
-		vui_scope_radius(VuiCtrlState_default, 10.f)
-		vui_scope_border_color(VuiCtrlState_default, vui_color_clouds)
-		vui_scope_bg_color(VuiCtrlState_default, vui_color_amethyst)
-		vui_scroll_view_start(vui_sib_id,
-			VuiScrollFlags_vertical |
-			VuiScrollFlags_resizable |
-			VuiScrollFlags_horizontal);
-
-		vui_row_layout();
-
-		for (int i = 0; i < 5; i += 1) {
-			vui_ctrl_start(vui_sib_id + i, 0, 0);
+	vui_row_layout();
+	{
+		vui_text(vui_sib_id, "Buttons", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
-			vui_scope_width(VuiCtrlState_default, 200.f)
-			vui_scope_border_color(VuiCtrlState_default, vui_color_pomegranate)
-			vui_scope_bg_color(VuiCtrlState_default, vui_color_midnight_blue)
-			vui_scope_height(VuiCtrlState_default, 200.f) {
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-				vui_box(vui_sib_id);
-			}
-
-			vui_ctrl_end();
+			VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
+			vui_image_button(vui_sib_id, app_state.images[2], VuiColor_white, vui_ss.button_action);
+			vui_image_text_button(vui_sib_id, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
-		vui_scroll_view_end();
+		vui_text(vui_sib_id, "Toggle Buttons", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_text_toggle_button(vui_sib_id, NULL, "Button 1", vui_ss.button_action);
+			vui_image_toggle_button(vui_sib_id, NULL, app_state.images[2], VuiColor_white, vui_ss.button_action);
+			vui_image_text_toggle_button(vui_sib_id, NULL, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
+		}
+
+		vui_text(vui_sib_id, "Select Buttons", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			static VuiCtrlSibId selected_sib_id = 0;
+			vui_text_select_button(vui_sib_id, &selected_sib_id, "Button 1", vui_ss.button_action);
+			vui_image_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, vui_ss.button_action);
+			vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
+		}
+
+		vui_text(vui_sib_id, "Check Boxes", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_text_check_box(vui_sib_id, NULL, "Button 1", vui_ss.check_box);
+			vui_image_check_box(vui_sib_id, NULL, app_state.images[2], VuiColor_white, vui_ss.check_box);
+		}
+
+		vui_text(vui_sib_id, "Radio Buttons", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			static VuiCtrlSibId selected_sib_id = 0;
+			vui_text_radio_button(vui_sib_id, &selected_sib_id, "Button 1", vui_ss.radio_button);
+			vui_image_radio_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, vui_ss.radio_button);
+		}
+
+		vui_text(vui_sib_id, "Progress Bar", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		{
+			static float value = 0.f;
+			static VuiBool go_backward = vui_false;
+			if (go_backward) {
+				value -= 0.5;
+			} else {
+				value += 0.5;
+			}
+			if (value >= 100.f)  {
+				go_backward = vui_true;
+			} else if (value <= 0.f)  {
+				go_backward = vui_false;
+			}
+
+
+			vui_scope_width(200.f)
+			vui_scope_height(40.f)
+			vui_progress_bar(vui_sib_id, value, 0.f, 100.f, &vui_ss.progress_bar);
+		}
+
+		vui_text(vui_sib_id, "Text & Input Boxes", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_scope_align(VuiAlign_left_center) {
+				vui_text(vui_sib_id, "Text:  ", 0.f, &vui_ss.text_menu);
+				static char buf[20] = {0};
+				vui_scope_width(200.f)
+				vui_text_box(vui_sib_id, buf, sizeof(buf), vui_ss.text_box);
+			}
+		}
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_scope_align(VuiAlign_left_center) {
+				vui_text(vui_sib_id, "Uint:  ", 0.f, &vui_ss.text_menu);
+				static uint32_t value = 0;
+				vui_scope_width(200.f)
+				vui_input_box_uint(vui_sib_id, &value, vui_ss.text_box);
+			}
+		}
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_scope_align(VuiAlign_left_center) {
+				vui_text(vui_sib_id, "Sint:  ", 0.f, &vui_ss.text_menu);
+				static int32_t value = 0;
+				vui_scope_width(200.f)
+				vui_input_box_sint(vui_sib_id, &value, vui_ss.text_box);
+			}
+		}
+		vui_scope_ctrl(vui_sib_id, NULL) {
+			vui_column_layout();
+
+			vui_scope_align(VuiAlign_left_center) {
+				vui_text(vui_sib_id, "Float: ", 0.f, &vui_ss.text_menu);
+				static float value = 0;
+				vui_scope_width(200.f)
+				vui_input_box_float(vui_sib_id, &value, vui_ss.text_box);
+			}
+		}
 	}
+	vui_scroll_view_end();
 
 	vui_window_end();
 	vui_frame_end();
@@ -342,7 +416,7 @@ uint32_t utf8codepoint(char* str, int32_t* out_codepoint) {
 	return bytes;
 }
 
-VuiVec2 position_text(void* userdata, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
+VuiVec2 position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
 	if (text_length == 0) { return VuiVec2_zero; }
 	ScaledFont* font = {0};
 	switch (font_id) {
@@ -362,7 +436,7 @@ VuiVec2 position_text(void* userdata, VuiFontId font_id, float text_height, char
 	int ascent, descent, line_gap;
 	stbtt_GetFontVMetrics(font->info, &ascent, &descent, &line_gap);
 
-	float scale = stbtt_ScaleForPixelHeight(font->info, text_height);
+	float scale = stbtt_ScaleForPixelHeight(font->info, line_height);
 	ascent = roundf(ascent * scale);
 	descent = roundf(descent * scale);
 
@@ -620,6 +694,7 @@ int main(int argc, char** argv) {
 
 	SDL_Window* window = SDL_CreateWindow("Vui Example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
 	SDL_GLContext context = SDL_GL_CreateContext(window);
+	SDL_GL_SetSwapInterval(1);
 
 	opengl_compile_and_use_shader();
 	opengl_gen_vao_vbos();
@@ -627,14 +702,11 @@ int main(int argc, char** argv) {
 	render_state.tex_glyph = opengl_gen_texture();
 	render_state.tex_image = opengl_gen_texture();
 
-	VuiStyle style;
-	VuiStyle_init_default(&style);
 	VuiSetup setup = {
 		.position_text_fn = position_text,
 		.position_text_userdata = NULL,
 		.text_box_focus_change_fn = vui_text_box_focus_change,
 		.windows_count = 1,
-		.style = &style,
 	};
 	vui_assert(vui_init(&setup), "failed to initialize vui");
 

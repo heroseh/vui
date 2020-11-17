@@ -72,51 +72,59 @@ void _VuiPool_reset(_VuiPool* pool, uintptr_t elmt_size) {
 	pool->free_list_head_id = 1;
 }
 
-void _VuiPool_expand(_VuiPool* pool, uint32_t new_cap, uintptr_t elmt_size, uintptr_t elmt_align) {
-	vui_assert(new_cap >= pool->cap, "vui pool can only expand");
+void _VuiPool_resize_cap(_VuiPool* pool, uint32_t new_cap, uintptr_t elmt_size, uintptr_t elmt_align) {
+	//
+	// resizing the pool is fine since we store id's everywhere.
+	//
+	uintptr_t bitset_size = pool->elmts_start_byte_idx;
+	uintptr_t new_bitset_size = (new_cap / 8) + 1 + elmt_align - 1;
+	uintptr_t new_cap_bytes = ((uintptr_t)new_cap * elmt_size) + new_bitset_size;
+
+	void* data = pool->data;
+	void* new_data = vui_mem_alloc(_vui.allocator, new_cap_bytes, alignof(uint8_t));
 
 	//
-	// expand the pool, this is fine since we store id's everywhere.
-	//
-	uint32_t bitset_size = (pool->cap / 8) + 1;
-	uintptr_t cap_bytes = ((uintptr_t)pool->cap * elmt_size) + pool->elmts_start_byte_idx;
-
-	uint32_t new_bitset_size = (new_cap / 8) + 1;
-	uint32_t new_elmts_start_byte_idx = (uintptr_t)vui_ptr_round_up_align((void*)(uintptr_t)new_bitset_size, elmt_align);
-	uintptr_t new_cap_bytes = ((uintptr_t)new_cap * elmt_size) +
-		new_elmts_start_byte_idx;
-
-	void* new_data = vui_mem_realloc(_vui.allocator, pool->data, cap_bytes, new_cap_bytes, elmt_align);
-	pool->data = new_data;
-
-	void* elmts = vui_ptr_add(new_data, pool->elmts_start_byte_idx);
-	void* new_elmts = vui_ptr_add(new_data, new_elmts_start_byte_idx);
-
-	//
-	// shift the elements to their new elmts_start_byte_idx.
-	memmove(new_elmts, elmts, (uintptr_t)pool->cap * elmt_size);
 	// zero the new bits of the is_allocated_bitset.
-	memset(elmts, 0, new_elmts_start_byte_idx - pool->elmts_start_byte_idx);
+	memset(vui_ptr_add(new_data, bitset_size), 0, new_bitset_size - bitset_size);
+
 	// then zero all the new elements.
-	memset(vui_ptr_add(new_elmts, (uintptr_t)pool->cap * elmt_size), 0,
-		((uintptr_t)(new_cap - pool->cap) * elmt_size));
+	memset(vui_ptr_add(new_data, new_bitset_size + (uintptr_t)pool->cap * elmt_size), 0, ((uintptr_t)(new_cap - pool->cap) * elmt_size));
+
+	if (data) {
+		uintptr_t cap_bytes = ((uintptr_t)pool->cap * elmt_size) + bitset_size;
+
+		//
+		// copy the bitset over to the new buffer
+		memcpy(new_data, data, bitset_size);
+
+		//
+		// copy the elements to their new location.
+		void* elmts = vui_ptr_add(data, pool->elmts_start_byte_idx);
+		void* new_elmts = vui_ptr_add(new_data, new_bitset_size);
+		memcpy(new_elmts, elmts, (uintptr_t)pool->cap * elmt_size);
+
+		//
+		// deallocate the old buffer.
+		vui_mem_dealloc(_vui.allocator, data, cap_bytes, alignof(uint8_t));
+	}
 
 	//
 	// setup the free list, by visiting each element and store an
 	// index to the next element.
 	for (uint32_t i = pool->cap; i < new_cap; i += 1) {
-		*(uint32_t*)vui_ptr_add(new_elmts, i * elmt_size) = i + 2;
+		*(uint32_t*)vui_ptr_add(vui_ptr_add(new_data, new_bitset_size), i * elmt_size) = i + 2;
 	}
 
+	pool->data = new_data;
 	pool->free_list_head_id = pool->cap + 1;
 	pool->cap = new_cap;
-	pool->elmts_start_byte_idx = new_elmts_start_byte_idx;
+	pool->elmts_start_byte_idx = new_bitset_size;
 }
 
 void _VuiPool_reset_and_populate(_VuiPool* pool, void* elmts, uint32_t count, uintptr_t elmt_size, uintptr_t elmt_align) {
 	_VuiPool_reset(pool, elmt_size);
 	if (pool->cap < count) {
-		_VuiPool_expand(pool, vui_max(pool->cap ? pool->cap * 2 : 64, count), elmt_size, elmt_align);
+		_VuiPool_resize_cap(pool, vui_max(pool->cap ? pool->cap * 2 : 64, count), elmt_size, elmt_align);
 	}
 
 	//
@@ -156,7 +164,7 @@ void _VuiPool_deinit(_VuiPool* pool, uintptr_t elmt_size, uintptr_t elmt_align) 
 
 void* _VuiPool_alloc(_VuiPool* pool, VuiPoolId* id_out, uintptr_t elmt_size, uintptr_t elmt_align) {
 	if (pool->count == pool->cap) {
-		_VuiPool_expand(pool, pool->cap ? pool->cap * 2 : 64, elmt_size, elmt_align);
+		_VuiPool_resize_cap(pool, pool->cap ? pool->cap * 2 : 64, elmt_size, elmt_align);
 	}
 
 	//
@@ -305,10 +313,13 @@ typedef struct {
 	VuiWindowRender render;
 } _VuiWindow;
 
-typedef struct VuiStyleChange VuiStyleChange;
-struct VuiStyleChange {
-	VuiStyleChange* prev;
-	VuiStyle* style;
+typedef uint8_t VuiCtrlAttrType;
+enum {
+	VuiCtrlAttrType_float,
+	VuiCtrlAttrType_vec2,
+	VuiCtrlAttrType_align,
+	VuiCtrlAttrType_bool,
+	VuiCtrlAttrType_image_scale_mode,
 };
 
 typedef struct VuiCtrlAttrChange VuiCtrlAttrChange;
@@ -394,13 +405,17 @@ typedef struct {
 		VuiCtrlId sibling_prev_ctrl_id;
 		float fill_portion_width;
 		float fill_portion_height;
-		VuiStyle* style;
-		VuiStyle local_style;
-		VuiCtrlAttrChange* ctrl_state_attr_change_list_heads[VuiCtrlState_COUNT][VuiCtrlAttr_COUNT];
-		VuiStyleChange* style_change_list_head;
+		VuiCtrlAttrChange* ctrl_attr_change_list_heads[VuiCtrlAttr_COUNT];
+		VuiCtrlAttrs ctrl_attrs;
 		VuiVec2* mouse_scroll_focused_content_offset;
 		VuiVec2* mouse_scroll_focused_size;
 	} build;
+
+	//
+	// this is the temporary style that is used interpolate between the current style and the target style.
+	// HACK: a style could be any size as it is generally unique for every type of control.
+	// so we just make sure the _vui_style_buf is definately big enough.
+	union { VuiCtrlStyle style; char style_buf[256]; };
 
 	//
 	// the data that is used when rendering the UI tree.
@@ -415,51 +430,101 @@ typedef struct {
 
 _Vui _vui = {0};
 
-void _vui_push_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr, VuiCtrlAttrValue value) {
-	VuiStyle* local_style = &_vui.build.local_style;
-	VuiCtrlAttrValue* style_value = &local_style->state_attr_values[ctrl_state][attr];
+VuiCtrlAttrType VuiCtrlAttr_types[VuiCtrlAttr_COUNT] = {
+	[VuiCtrlAttr_width] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_width_min] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_width_max] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_height] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_height_min] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_height_max] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_offset] = VuiCtrlAttrType_vec2,
+	[VuiCtrlAttr_align] = VuiCtrlAttrType_align,
+	[VuiCtrlAttr_layout_spacing] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_layout_wrap_spacing] = VuiCtrlAttrType_float,
+	[VuiCtrlAttr_layout_wrap] = VuiCtrlAttrType_bool,
+    [VuiCtrlAttr_image_scale_mode] = VuiCtrlAttrType_image_scale_mode,
+};
+
+uint16_t VuiCtrlAttr_offsets[VuiCtrlAttr_COUNT] = {
+	[VuiCtrlAttr_width] = offsetof(VuiCtrlAttrs, width),
+	[VuiCtrlAttr_width_min] = offsetof(VuiCtrlAttrs, width_min),
+	[VuiCtrlAttr_width_max] = offsetof(VuiCtrlAttrs, width_max),
+	[VuiCtrlAttr_height] = offsetof(VuiCtrlAttrs, height),
+	[VuiCtrlAttr_height_min] = offsetof(VuiCtrlAttrs, height_min),
+	[VuiCtrlAttr_height_max] = offsetof(VuiCtrlAttrs, height_max),
+	[VuiCtrlAttr_offset] = offsetof(VuiCtrlAttrs, offset),
+	[VuiCtrlAttr_align] = offsetof(VuiCtrlAttrs, align),
+	[VuiCtrlAttr_layout_spacing] = offsetof(VuiCtrlAttrs, layout_spacing),
+	[VuiCtrlAttr_layout_wrap_spacing] = offsetof(VuiCtrlAttrs, layout_wrap_spacing),
+	[VuiCtrlAttr_layout_wrap] = offsetof(VuiCtrlAttrs, layout_wrap),
+    [VuiCtrlAttr_image_scale_mode] = offsetof(VuiCtrlAttrs, image_scale_mode),
+};
+
+void _vui_push_ctrl_attr(VuiCtrlAttr attr, VuiCtrlAttrValue value) {
+	//
+	// allocate a new change to store the old attribute.
+	VuiCtrlAttrChange* old_attr_change = vui_frame_data_alloc_elmt(VuiCtrlAttrChange);
+	old_attr_change->prev = _vui.build.ctrl_attr_change_list_heads[attr];
+	_vui.build.ctrl_attr_change_list_heads[attr] = old_attr_change;
+
+	void* ptr = vui_ptr_add(&_vui.build.ctrl_attrs, (uintptr_t)VuiCtrlAttr_offsets[attr]);
+	VuiCtrlAttrType type = VuiCtrlAttr_types[attr];
 
 	//
-	// see if there is already a value in that state's attribute.
-	VuiCtrlAttrFlags attr_flag = (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
-	if (local_style->state_attr_flags[ctrl_state] & attr_flag) {
-		//
-		// a value already exists so allocate a new change to store the old attribute.
-		VuiCtrlAttrChange* old_attr_change = vui_frame_data_alloc_elmt(VuiCtrlAttrChange);
-		old_attr_change->prev = _vui.build.ctrl_state_attr_change_list_heads[ctrl_state][attr];
-		_vui.build.ctrl_state_attr_change_list_heads[ctrl_state][attr] = old_attr_change;
-
-		//
-		// store the orignal value in the old_attr_change (history entry)
-		old_attr_change->value = *style_value;
-	} else {
-		// set the flag to say that a value exists for the attribute.
-		local_style->state_attr_flags[ctrl_state] |= attr_flag;
+	// store the orignal value in the old_attr_change (history entry)
+	// and then set the value in the global attributes structure
+	switch (type) {
+		case VuiCtrlAttrType_float:
+			old_attr_change->value.float_ = *(float*)ptr;
+			*(float*)ptr = value.float_;
+			break;
+		case VuiCtrlAttrType_vec2:
+			old_attr_change->value.vec2 = *(VuiVec2*)ptr;
+			*(VuiVec2*)ptr = value.vec2;
+			break;
+		case VuiCtrlAttrType_align:
+			old_attr_change->value.align = *(VuiAlign*)ptr;
+			*(VuiAlign*)ptr = value.align;
+			break;
+		case VuiCtrlAttrType_bool:
+			old_attr_change->value.float_ = *(VuiBool*)ptr;
+			*(VuiBool*)ptr = value.bool_;
+			break;
+		case VuiCtrlAttrType_image_scale_mode:
+			old_attr_change->value.float_ = *(VuiImageScaleMode*)ptr;
+			*(VuiImageScaleMode*)ptr = value.image_scale_mode;
+			break;
 	}
-
-	// now overwrite the value with the new one.
-	memset(style_value, 0, sizeof(*style_value));
-	*style_value = value;
 }
 
-void _vui_pop_ctrl_attr(VuiCtrlState ctrl_state, VuiCtrlAttr attr) {
-	VuiStyle* local_style = &_vui.build.local_style;
-	VuiCtrlAttrValue* style_value = &local_style->state_attr_values[ctrl_state][attr];
+void _vui_pop_ctrl_attr(VuiCtrlAttr attr) {
+	VuiCtrlAttrChange* old_attr_change = _vui.build.ctrl_attr_change_list_heads[attr];
 
-	VuiCtrlAttrChange* old_attr_change = _vui.build.ctrl_state_attr_change_list_heads[ctrl_state][attr];
-	if (old_attr_change) {
-		//
-		// restore the orignal value from the old_attr_change (history entry)
-		*style_value = old_attr_change->value;
-		_vui.build.ctrl_state_attr_change_list_heads[ctrl_state][attr] = old_attr_change->prev;
-	} else {
-		// we have popped all the attribute values off for this state.
-		// so remove the flags from the the state's attribute flags.
-		// this will make future calls to _VuiCtrl_style_attr avoid getting
-		// this state's attribute value and instead use the global style at _vui.build.style
-		local_style->state_attr_flags[ctrl_state] &= ~((VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr);
-		memset(style_value, 0, sizeof(*style_value));
+	void* ptr = vui_ptr_add(&_vui.build.ctrl_attrs, (uintptr_t)VuiCtrlAttr_offsets[attr]);
+	VuiCtrlAttrType type = VuiCtrlAttr_types[attr];
+
+	//
+	// restore the orignal value from the old_attr_change (history entry)
+	// by storing the value in the global attributes structure
+	switch (type) {
+		case VuiCtrlAttrType_float:
+			*(float*)ptr = old_attr_change->value.float_;
+			break;
+		case VuiCtrlAttrType_vec2:
+			*(VuiVec2*)ptr = old_attr_change->value.vec2;
+			break;
+		case VuiCtrlAttrType_align:
+			*(VuiAlign*)ptr = old_attr_change->value.align;
+			break;
+		case VuiCtrlAttrType_bool:
+			*(VuiBool*)ptr = old_attr_change->value.bool_;
+			break;
+		case VuiCtrlAttrType_image_scale_mode:
+			*(VuiImageScaleMode*)ptr = old_attr_change->value.image_scale_mode;
+			break;
 	}
+
+	_vui.build.ctrl_attr_change_list_heads[attr] = old_attr_change->prev;
 }
 
 // ===========================================================================================
@@ -800,17 +865,17 @@ void vui_ctrl_set_focused(VuiCtrlId ctrl_id) {
 
 void _vui_ctrl_set_mouse_focused(VuiCtrlId ctrl_id) {
 	//
-	// remove focus from the currently focused control.
-	if (_vui.mouse_focused_ctrl_id) {
+	// remove focus from the currently focused control unless it is keyboard focused.
+	if (_vui.mouse_focused_ctrl_id && _vui.mouse_focused_ctrl_id != _vui.windows[_vui.focused_window_id].focused_ctrl_id) {
 		VuiCtrl* focused_ctrl = vui_ctrl_get(_vui.mouse_focused_ctrl_id);
-		focused_ctrl->state_flags &= ~VuiCtrlStateFlags_mouse_focused;
+		focused_ctrl->state_flags &= ~VuiCtrlStateFlags_focused;
 	}
 
 	//
 	// if a control was supplied, make that the new mouse focused control
 	if (ctrl_id) {
 		VuiCtrl* ctrl = vui_ctrl_get(ctrl_id);
-		ctrl->state_flags |= VuiCtrlStateFlags_mouse_focused;
+		ctrl->state_flags |= VuiCtrlStateFlags_focused;
 	}
 
 	_vui.mouse_focused_ctrl_id = ctrl_id;
@@ -829,19 +894,19 @@ VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
 
 	if ((_vui.input.actions & VuiInputActions_focus_pressed) == VuiInputActions_focus_pressed) {
 		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_pressed;
+			return VuiFocusState_pressed | VuiFocusState_held | VuiFocusState_focused;
 		}
 	}
 
 	if ((_vui.input.actions & VuiInputActions_focus_held) == VuiInputActions_focus_held) {
 		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_held;
+			return VuiFocusState_held | VuiFocusState_focused;
 		}
 	}
 
 	if ((_vui.input.actions & VuiInputActions_focus_released) == VuiInputActions_focus_released) {
 		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_released;
+			return VuiFocusState_released | VuiFocusState_focused;
 		}
 	}
 
@@ -854,9 +919,9 @@ VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
         if (is_ctrl_mouse_focused) {
             vui_ctrl_set_focused(ctrl_id);
 			if ((_vui.input.mouse.buttons_has_been_released & VuiMouseButtons_left) == VuiMouseButtons_left) {
-				return VuiFocusState_released;
+				return VuiFocusState_pressed | VuiFocusState_held | VuiFocusState_released | VuiFocusState_focused;
 			}
-            return VuiFocusState_pressed;
+			return VuiFocusState_pressed | VuiFocusState_held | VuiFocusState_focused;
         } else {
             if (vui_ctrl_is_focused(ctrl_id)) {
                 vui_ctrl_set_focused(0);
@@ -866,13 +931,13 @@ VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
 
     if ((_vui.input.mouse.buttons_is_pressed & VuiMouseButtons_left) == VuiMouseButtons_left) {
         if (vui_ctrl_is_focused(ctrl_id)) {
-            return VuiFocusState_held;
+			return VuiFocusState_held | VuiFocusState_focused;
         }
     }
 
     if ((_vui.input.mouse.buttons_has_been_released & VuiMouseButtons_left) == VuiMouseButtons_left) {
         if (vui_ctrl_is_mouse_focused(ctrl_id)) {
-            return VuiFocusState_released;
+            return VuiFocusState_released | VuiFocusState_focused;
         }
     }
 
@@ -891,93 +956,415 @@ VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
 //
 // ===========================================================================================
 
-void _VuiStyle_set_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state, VuiCtrlAttrValue value) {
-	style->state_attr_flags[ctrl_state] |= (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
-	VuiCtrlAttrValue* style_value = &style->state_attr_values[ctrl_state][attr];
-	memset(style_value, 0, sizeof(*style_value));
-	*style_value = value;
-}
-
-void _VuiStyle_unset_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlState ctrl_state) {
-	style->state_attr_flags[ctrl_state] &= ~((VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr);
-	VuiCtrlAttrValue* style_value = &style->state_attr_values[ctrl_state][attr];
-	memset(style_value, 0, sizeof(*style_value));
-}
-
-void vui_push_style(VuiStyle* style) {
-	VuiStyleChange* c = vui_frame_data_alloc_elmt(VuiStyleChange);
-	c->prev = _vui.build.style_change_list_head;
-	c->style = _vui.build.style;
-	_vui.build.style = style;
-}
-
-void vui_pop_style() {
-	VuiStyleChange* c = _vui.build.style_change_list_head;
-	_vui.build.style = c->style;
-	_vui.build.style_change_list_head = c->prev;
-}
-
-const VuiCtrlAttrValue* VuiStyle_attr(VuiStyle* style, VuiCtrlAttr attr, VuiCtrlStateFlags ctrl_state_flags) {
+VuiCtrlState VuiCtrl_state(VuiCtrl* ctrl) {
+	VuiCtrlStateFlags state_flags = ctrl->state_flags;
 	//
-	// look through each state from important to least important.
-	// if the control has that state and the attribute is enabled, then return a pointer to that attribute.
-	VuiCtrlStateFlags state_flags = ctrl_state_flags | VuiCtrlState_default;
-	VuiCtrlAttrFlags attr_flag = (VuiCtrlAttrFlags)1 << (VuiCtrlAttrFlags)attr;
-	for (VuiCtrlState state = 0; state < VuiCtrlState_COUNT; state += 1) {
-		if ((state_flags & state) && style->state_attr_flags[state] & attr_flag) {
-			return &style->state_attr_values[state][attr];
+	// return the highest set bit.
+	// x86 & arm have instructions to count leading zeros
+	// this can be used to find the highest set bit without a loop.
+	// not sure if this is worth the extra ifdef complication in the code.
+	VuiCtrlState state = 0;
+	while (state_flags >>= 1) {
+		state += 1;
+	}
+	return state;
+}
+
+void VuiCtrl_target_style(VuiCtrl* ctrl, const VuiCtrlStyle* target_style) {
+	if (ctrl->style == target_style || ctrl->target_style == target_style)
+		return;
+
+	if (ctrl->target_style == NULL)
+		ctrl->interp_ratio = 0.f;
+
+	if (ctrl->style == NULL) {
+		ctrl->style = target_style;
+		ctrl->target_style = NULL;
+	} else {
+		// TODO: replace this block with this line when we work on interpolating styles
+		// ctrl->target_style = target_style;
+		ctrl->style = target_style;
+		ctrl->target_style = NULL;
+	}
+}
+
+VuiThickness VuiCtrl_interp_margin(VuiCtrl* ctrl) {
+	VuiThickness margin = {0};
+	if (ctrl->style) {
+		if (ctrl->target_style) {
+			VuiThickness_lerp(&margin, &ctrl->target_style->margin, &ctrl->style->margin, ctrl->interp_ratio);
+		} else {
+			margin = ctrl->style->margin;
 		}
 	}
-
-	return NULL;
+	return margin;
 }
 
-const VuiCtrlAttrValue* _VuiCtrl_style_attr(VuiCtrl* ctrl, VuiCtrlAttr attr) {
-	//
-	// look in the local style first, return if we find an attribute with this control state
-	const VuiCtrlAttrValue* v = VuiStyle_attr(&_vui.build.local_style, attr, ctrl->state_flags);
-	if (v) return v;
-
-	//
-	// now look in the global style, return if we find an attribute with this control state
-	v = VuiStyle_attr(_vui.build.style, attr, ctrl->state_flags);
-	if (v) return v;
-
-	// no attributes found, so return a zero value
-	static VuiCtrlAttrValue zero_value = {0};
-	return &zero_value;
+VuiThickness VuiCtrl_interp_padding(VuiCtrl* ctrl) {
+	VuiThickness padding = {0};
+	if (ctrl->style) {
+		if (ctrl->target_style) {
+			VuiThickness_lerp(&padding, &ctrl->target_style->padding, &ctrl->style->padding, ctrl->interp_ratio);
+		} else {
+			padding = ctrl->style->padding;
+		}
+	}
+	return padding;
 }
 
-void VuiStyle_init_default(VuiStyle* style) {
-	memset(style, 0, sizeof(VuiStyle));
-	VuiStyle_set_width(style, VuiCtrlState_default, vui_auto_len);
-	VuiStyle_set_height(style, VuiCtrlState_default, vui_auto_len);
-	VuiStyle_set_bg_color(style, VuiCtrlState_default, vui_color_emerald);
-	VuiStyle_set_border_color(style, VuiCtrlState_default, vui_color_orange);
-	VuiStyle_set_border_width(style, VuiCtrlState_default, 4.f);
-	VuiStyle_set_bg_color(style, VuiCtrlState_mouse_focused, vui_color_nephritis);
-	VuiStyle_set_border_color(style, VuiCtrlState_mouse_focused, vui_color_pumpkin);
-	VuiStyle_set_border_width(style, VuiCtrlState_mouse_focused, 4.f);
-	VuiStyle_set_text_color(style, VuiCtrlState_default, vui_color_white);
-	VuiStyle_set_check_color(style, VuiCtrlState_default, vui_color_wisteria);
-	VuiStyle_set_check_size(style, VuiCtrlState_default, 24.f);
-	VuiStyle_set_text_height(style, VuiCtrlState_default, 32.f);
-	VuiStyle_set_text_cursor_width(style, VuiCtrlState_default, 4.f);
-	VuiStyle_set_text_cursor_color(style, VuiCtrlState_default, vui_color_wisteria);
-	VuiStyle_set_text_selection_color(style, VuiCtrlState_default, VuiColor_init(0x34, 0x98, 0xdb, 0x80));
-
-    VuiStyle_set_scroll_bar_width(style, VuiCtrlState_default, 24.f);
-    VuiStyle_set_scroll_bar_border_width(style, VuiCtrlState_default, 4.f);
-    VuiStyle_set_scroll_bar_border_color(style, VuiCtrlState_default, vui_color_dark_gray);
-    VuiStyle_set_scroll_bar_bg_color(style, VuiCtrlState_default, vui_color_black);
-    VuiStyle_set_scroll_bar_radius(style, VuiCtrlState_default, 4.f);
-    VuiStyle_set_scroll_bar_margin(style, VuiCtrlState_default, VuiThickness_init_even(2.f));
-    VuiStyle_set_scroll_bar_slider_border_width(style, VuiCtrlState_default, 4.f);
-    VuiStyle_set_scroll_bar_slider_border_color(style, VuiCtrlState_default, vui_color_alizarin);
-    VuiStyle_set_scroll_bar_slider_bg_color(style, VuiCtrlState_default, vui_color_orange);
-
-	VuiStyle_set_progress_bar_color(style, VuiCtrlState_default, vui_color_alizarin);
+void VuiCtrlStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiThickness_lerp(&result->margin, &to->margin, &from->margin, interp_ratio);
+	VuiThickness_lerp(&result->padding, &to->padding, &from->padding, interp_ratio);
+	result->bg_color = VuiColor_lerp(to->bg_color, from->bg_color, interp_ratio);
+	result->border_color = VuiColor_lerp(to->border_color, from->border_color, interp_ratio);
+	result->border_width = vui_lerp(to->border_width, from->border_width, interp_ratio);
+	result->radius = vui_lerp(to->radius, from->radius, interp_ratio);
 }
+
+void VuiTextStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiTextStyle* result_ = (VuiTextStyle*)result;
+	VuiTextStyle* to_ = (VuiTextStyle*)to;
+	VuiTextStyle* from_ = (VuiTextStyle*)from;
+	result_->line_height = vui_lerp(to_->line_height, from_->line_height, interp_ratio);
+	result_->color = VuiColor_lerp(to_->color, from_->color, interp_ratio);
+	result_->font_id = to_->font_id;
+}
+
+void VuiSeparatorStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiSeparatorStyle* result_ = (VuiSeparatorStyle*)result;
+	VuiSeparatorStyle* to_ = (VuiSeparatorStyle*)to;
+	VuiSeparatorStyle* from_ = (VuiSeparatorStyle*)from;
+	result_->size = vui_lerp(to_->size, from_->size, interp_ratio);
+}
+
+void VuiButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+}
+
+void VuiCheckBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiCheckBoxStyle* result_ = (VuiCheckBoxStyle*)result;
+	VuiCheckBoxStyle* to_ = (VuiCheckBoxStyle*)to;
+	VuiCheckBoxStyle* from_ = (VuiCheckBoxStyle*)from;
+	result_->check_color = VuiColor_lerp(to_->check_color, from_->check_color, interp_ratio);
+	result_->check_size = vui_lerp(to_->check_size, from_->check_size, interp_ratio);
+}
+
+void VuiRadioButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+}
+
+void VuiProgressBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiProgressBarStyle* result_ = (VuiProgressBarStyle*)result;
+	VuiProgressBarStyle* to_ = (VuiProgressBarStyle*)to;
+	VuiProgressBarStyle* from_ = (VuiProgressBarStyle*)from;
+	result_->bar_color = VuiColor_lerp(to_->bar_color, from_->bar_color, interp_ratio);
+}
+
+void VuiScrollBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+}
+
+void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+}
+
+void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+}
+
+VuiStyleSheet vui_ss = {
+	.image = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+	},
+	.box_panel = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+		.bg_color = vui_color_midnight_blue,
+		.border_color = vui_color_wet_asphalt,
+		.border_width = vui_border_width_default,
+		.radius = vui_radius_default,
+	},
+	.text_header = {
+		.margin = VuiThickness_init(4.f, 4.f, 4.f, 0.f),
+		.padding = vui_padding_default,
+		.color = vui_color_white,
+		.line_height = vui_line_height_header,
+		.font_id = 0,
+	},
+	.text_menu = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+		.color = vui_color_white,
+		.line_height = vui_line_height_menu,
+		.font_id = 0,
+	},
+	.separator = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+		.bg_color = vui_color_gray,
+		.radius = vui_radius_default,
+		.size = vui_separator_size_default,
+	},
+	.button_action = {
+		[VuiCtrlState_default] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_midnight_blue,
+			.border_color = vui_color_asbestos,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+		},
+		[VuiCtrlState_focused] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+		},
+		[VuiCtrlState_active] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_concrete,
+			.border_color = vui_color_wet_asphalt,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+		},
+		[VuiCtrlState_disabled] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_midnight_blue,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+		},
+	},
+	.check_box = {
+		[VuiCtrlState_default] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_midnight_blue,
+			.border_color = vui_color_asbestos,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_focused] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_active] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_disabled] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_midnight_blue,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+	},
+	.radio_button = {
+		[VuiCtrlState_default] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_midnight_blue,
+			.border_color = vui_color_asbestos,
+			.border_width = vui_border_width_default,
+			.radius = 100.f,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_focused] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = 100.f,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_active] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = 100.f,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+		[VuiCtrlState_disabled] = {
+			.margin = vui_margin_default,
+			.padding = vui_padding_default,
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_midnight_blue,
+			.border_width = vui_border_width_default,
+			.radius = 100.f,
+			.text_style = &vui_ss.text_menu,
+			.image_style = &vui_ss.image,
+			.check_color = vui_color_amethyst,
+			.check_size = vui_check_size_default,
+		},
+	},
+	.text_box = {
+		[VuiCtrlState_default] = {
+			.margin = vui_margin_default,
+			.padding = {0},
+			.bg_color = vui_color_midnight_blue,
+			.border_color = vui_color_asbestos,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
+			.cursor_color = vui_color_amethyst,
+			.cursor_width = vui_cursor_width_default,
+		},
+		[VuiCtrlState_focused] = {
+			.margin = vui_margin_default,
+			.padding = {0},
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
+			.cursor_color = vui_color_amethyst,
+			.cursor_width = vui_cursor_width_default,
+		},
+		[VuiCtrlState_active] = {
+			.margin = vui_margin_default,
+			.padding = {0},
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_concrete,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
+			.cursor_color = vui_color_amethyst,
+			.cursor_width = vui_cursor_width_default,
+		},
+		[VuiCtrlState_disabled] = {
+			.margin = vui_margin_default,
+			.padding = {0},
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_midnight_blue,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+			.text_style = &vui_ss.text_menu,
+			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
+			.cursor_color = vui_color_amethyst,
+			.cursor_width = vui_cursor_width_default,
+		},
+	},
+	.progress_bar = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+		.bg_color = vui_color_midnight_blue,
+		.border_color = vui_color_concrete,
+		.border_width = vui_border_width_default,
+		.radius = vui_radius_default,
+		.bar_color = vui_color_wisteria,
+	},
+	.scroll_view = {
+		.margin = vui_margin_default,
+		.padding = {0},
+		.bg_color = vui_color_midnight_blue,
+		.border_color = vui_color_wet_asphalt,
+		.border_width = vui_border_width_default,
+		.radius = vui_radius_default,
+		.bar_style = &vui_ss.scroll_bar,
+	},
+	.scroll_bar = {
+		.margin = vui_margin_default,
+		.padding = {0},
+		.bg_color = vui_color_midnight_blue,
+		.border_color = vui_color_wet_asphalt,
+		.border_width = vui_border_width_default,
+		.radius = vui_radius_default,
+		.slider_style = vui_ss.scroll_bar_slider,
+		.width = vui_scroll_bar_width_default,
+	},
+	.scroll_bar_slider = {
+		[VuiCtrlState_default] = {
+			.margin = {0},
+			.padding = {0},
+			.bg_color = vui_color_pumpkin,
+			.border_color = vui_color_carrot,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+		},
+		[VuiCtrlState_focused] = {
+			.margin = {0},
+			.padding = {0},
+			.bg_color = vui_color_carrot,
+			.border_color = vui_color_orange,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+		},
+		[VuiCtrlState_active] = {
+			.margin = {0},
+			.padding = {0},
+			.bg_color = vui_color_orange,
+			.border_color = vui_color_carrot,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+		},
+		[VuiCtrlState_disabled] = {
+			.margin = {0},
+			.padding = {0},
+			.bg_color = vui_color_wet_asphalt,
+			.border_color = vui_color_midnight_blue,
+			.border_width = vui_border_width_default,
+			.radius = vui_radius_default,
+		},
+	},
+};
 
 // ===========================================================================================
 //
@@ -1038,10 +1425,10 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 	vui_render_image_(rect, 0.f, 0.f, glyph_texture_id, *uv_rect, _vui_render_glyph_color, VuiImageScaleMode_stretch, vui_true);
 }
 
-void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float text_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
+void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, text_height, text, text_length, left_top, _vui_render_glyph);
+		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, left_top, _vui_render_glyph);
 	}
 }
 
@@ -1466,6 +1853,11 @@ void _vui_ctrl_dealloc(VuiCtrlId ctrl_id) {
 
 VuiCtrl* vui_ctrl_get(VuiCtrlId ctrl_id) {
 	vui_assert(ctrl_id, "cannot get an ctrl with a NULL identifier");
+	return vui_ctrl_try_get(ctrl_id);
+}
+
+VuiCtrl* vui_ctrl_try_get(VuiCtrlId ctrl_id) {
+	if (ctrl_id == 0) return NULL;
 	VuiPoolId pool_id = (ctrl_id & _VuiCtrlId_pool_id_MASK) >> _VuiCtrlId_pool_id_SHIFT;
 	uint16_t counter = (ctrl_id & _VuiCtrlId_counter_MASK) >> _VuiCtrlId_counter_SHIFT;
 	_VuiCtrl* ctrl = _VuiPool_id_to_ptr((_VuiPool*)&_vui.ctrl_pool, pool_id, sizeof(_VuiCtrl));
@@ -1509,6 +1901,9 @@ void _vui_ctrl_insert(VuiCtrl* ctrl) {
 		if (sib_prev->sibling_next_id) {
 			VuiCtrl* sib_next = vui_ctrl_get(sib_prev->sibling_next_id);
 			sib_next->sibling_prev_id = ctrl->id;
+		} else {
+			VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
+			parent->child_last_id = ctrl->id;
 		}
 		sib_prev->sibling_next_id = ctrl->id;
 	} else {
@@ -1519,7 +1914,82 @@ void _vui_ctrl_insert(VuiCtrl* ctrl) {
 	ctrl->parent_id = _vui.build.parent_ctrl_id;
 }
 
-void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change) {
+void VuiImage_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
+	VuiImageScaleMode scale_mode = ctrl->attributes.image_scale_mode;
+	vui_render_image(content_rect, ctrl->image_id, ctrl->image_tint, scale_mode);
+}
+
+void VuiText_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
+	const VuiTextStyle* style_ = (VuiTextStyle*)style;
+	char* text = &_vui.render.w->text[ctrl->text_start_idx];
+	vui_render_text(content_rect->left_top, style_->font_id, style_->line_height, text, ctrl->text_length, style_->color, ctrl->text_wrap_width);
+}
+
+void VuiCheckBoxCheck_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
+	VuiCtrl* parent = vui_ctrl_get(ctrl->parent_id);
+	VuiBool is_active = (parent->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
+	if (is_active)
+		vui_render_rect(content_rect, ((VuiCheckBoxStyle*)parent->style)->check_color, parent->style->radius);
+}
+
+void VuiProgressBar_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
+	VuiCtrl* parent = vui_ctrl_get(ctrl->parent_id);
+	vui_render_rect(content_rect, ((VuiProgressBarStyle*)parent->style)->bar_color, parent->style->radius);
+}
+
+static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id, float line_height) {
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, VuiVec2_zero, NULL);
+}
+
+void VuiTextBoxCursor_render(VuiCtrl* ctrl, const VuiCtrlStyle* _style, VuiRect* content_rect) {
+	VuiCtrl* parent = vui_ctrl_get(ctrl->parent_id);
+	const VuiTextBoxStyle* style = (VuiTextBoxStyle*)parent->style;
+	const VuiTextStyle* text_style = style->text_style;
+
+	//
+	// if we are focused, render the cursor or selection box.
+	if (vui_ctrl_is_focused(parent->id) && _vui.input.focused_text_box.string) {
+		float cursor_width = 0.f;
+		VuiColor color = {0};
+
+		// get the offset to the cursor
+		VuiVec2 start_idx_offset = vui_get_text_size(_vui.input.focused_text_box.string, _vui.input.focused_text_box.cursor_idx, 0.f, text_style->font_id, text_style->line_height);
+		if (_vui.input.focused_text_box.select_offset) {
+			//
+			// we are selecting so find the other end of the selection box
+			VuiVec2 end_idx_offset = vui_get_text_size(_vui.input.focused_text_box.string,
+				_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset, 0.f, text_style->font_id, text_style->line_height);
+			if (_vui.input.focused_text_box.select_offset < 0) {
+				VuiVec2 tmp = end_idx_offset;
+				end_idx_offset = start_idx_offset;
+				start_idx_offset = tmp;
+			}
+
+			color = style->selection_color;
+			cursor_width = end_idx_offset.x - start_idx_offset.x;
+		} else {
+			//
+			// no selection, we have a cursor
+			color = style->cursor_color;
+			cursor_width = style->cursor_width;
+
+			//
+			// evenly place the cursor in between two characters
+			if (_vui.input.focused_text_box.string_len > 0) {
+				start_idx_offset.x -= cursor_width / 2.f;
+			}
+		}
+
+		VuiCtrl* text_ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
+		float left = text_ctrl->rect.left + text_style->padding.left + start_idx_offset.x;
+		float top = text_ctrl->rect.top + text_style->padding.top;
+		VuiRect rect = VuiRect_init_wh(left, top, cursor_width, text_style->line_height);
+
+		vui_render_rect(&rect, color, style->radius);
+	}
+}
+
+void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change, const VuiCtrlStyle* style, VuiCtrlStyleInterpFn style_interp_fn, VuiCtrlRenderFn render_fn) {
 	VuiCtrl* parent_ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	//
@@ -1553,6 +2023,11 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 	// set the new state
 	ctrl->last_frame_idx = _vui.build.frame_idx;
 	ctrl->flags = flags;
+	ctrl->style_interp_fn = style_interp_fn;
+	ctrl->render_fn = render_fn;
+	if (style) {
+		VuiCtrl_target_style(ctrl, style);
+	}
 
 	if (flags & VuiCtrlFlags_focusable) {
 		VuiFocusState focus_state = _vui_ctrl_focus_state(ctrl->id);
@@ -1574,29 +2049,23 @@ void vui_ctrl_start(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange act
 		// pressable means it is active when pressed or held down.
 		// toggleable means it's active state is toggled with every press.
 		if (flags & VuiCtrlFlags_pressable) {
-			if (focus_state == VuiFocusState_pressed || focus_state == VuiFocusState_double_pressed || focus_state == VuiFocusState_held) {
+			if (focus_state & VuiFocusState_held) {
 				ctrl->state_flags |= VuiCtrlStateFlags_active;
 			} else {
 				ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 			}
 		} else if (flags & VuiCtrlFlags_selectable) {
-			if (focus_state == VuiFocusState_pressed) {
+			if (focus_state & VuiFocusState_pressed) {
 				ctrl->state_flags |= VuiCtrlStateFlags_active;
 			}
 		} else if (flags & VuiCtrlFlags_toggleable) {
-			if (focus_state == VuiFocusState_pressed) {
+			if (focus_state & VuiFocusState_pressed) {
 				ctrl->state_flags ^= VuiCtrlStateFlags_active;
 			}
 		}
 	}
 
-	//
-	// copy over the attributes.
-	//
-	for (VuiCtrlAttr attr = 0; attr < VuiCtrlAttr_COUNT; attr += 1) {
-		ctrl->attributes[attr] = *_VuiCtrl_style_attr(ctrl, attr);
-	}
-
+	ctrl->attributes = _vui.build.ctrl_attrs;
 	_vui.build.parent_ctrl_id = ctrl->id;
 	_vui.build.sibling_prev_ctrl_id = 0;
 }
@@ -1607,24 +2076,7 @@ void vui_ctrl_end() {
 	_vui.build.sibling_prev_ctrl_id = ctrl->id;
 }
 
-void vui_box_start(VuiCtrlSibId sib_id) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_background | VuiCtrlFlags_border, 0);
-}
-
-void vui_box_end() {
-	vui_ctrl_end();
-}
-
-void vui_box(VuiCtrlSibId sib_id) {
-	vui_box_start(sib_id);
-	vui_box_end();
-}
-
-VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id, float text_height) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, text_height, text, text_length, VuiVec2_zero, NULL);
-}
-
-void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width) {
+void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width, const VuiTextStyle* style) {
 	uint32_t text_start_idx = VuiStk_count(_vui.build.w->text);
 	if (text_length) {
 		char* t = VuiStk_push_many(&_vui.build.w->text, text_length);
@@ -1634,17 +2086,17 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 
 	VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-	float text_height = parent->attributes[VuiCtrlAttr_text_height].float_;
-	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width,
-		parent->attributes[VuiCtrlAttr_text_font_id].font_id, text_height);
+	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width, style->font_id, style->line_height);
 	if (size.y == 0.f) {
-		size.y = text_height;
+		size.y = style->line_height;
 	}
 
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_width(VuiCtrlState_default, size.x)
-	vui_scope_height(VuiCtrlState_default, size.y) {
-		vui_ctrl_start(sib_id, _VuiCtrlFlags_text, 0);
+	size.x += VuiThickness_horizontal(&style->padding);
+	size.y += VuiThickness_vertical(&style->padding);
+
+	vui_scope_width(size.x)
+	vui_scope_height(size.y) {
+		vui_ctrl_start_(sib_id, 0, 0, &style->ctrl, VuiTextStyle_interp, VuiText_render);
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 		ctrl->text_start_idx = text_start_idx;
 		ctrl->text_length = text_length;
@@ -1653,108 +2105,128 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 	}
 }
 
-void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint) {
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero) {
-		vui_ctrl_start(sib_id, _VuiCtrlFlags_image, 0);
-		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
-		VuiImage* image = vui_image_get(image_id);
-		if (ctrl->attributes[VuiCtrlAttr_width].float_ == vui_auto_len) {
-			ctrl->attributes[VuiCtrlAttr_width].float_ = image->width;
-		}
-
-		if (ctrl->attributes[VuiCtrlAttr_height].float_ == vui_auto_len) {
-			ctrl->attributes[VuiCtrlAttr_height].float_ = image->height;
-		}
-
-		ctrl->image_id = image_id;
-		ctrl->image_tint = image_tint;
-		vui_ctrl_end();
+void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle* style) {
+	vui_ctrl_start_(sib_id, 0, 0, style, VuiCtrlStyle_interp, VuiImage_render);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	VuiImage* image = vui_image_get(image_id);
+	if (ctrl->attributes.width == vui_auto_len) {
+		ctrl->attributes.width = image->width + VuiThickness_horizontal(&style->padding);
 	}
+
+	if (ctrl->attributes.height == vui_auto_len) {
+		ctrl->attributes.height = image->height + VuiThickness_vertical(&style->padding);
+	}
+
+	ctrl->image_id = image_id;
+	ctrl->image_tint = image_tint;
+	vui_ctrl_end();
 }
 
 void vui_spacing(VuiCtrlSibId sib_id, float width, float height) {
-	vui_scope_width(VuiCtrlState_default, width)
-	vui_scope_height(VuiCtrlState_default, width) {
-		vui_ctrl_start(sib_id, 0, 0);
+	vui_scope_width(width)
+	vui_scope_height(height) {
+		vui_ctrl_start_(sib_id, 0, 0, NULL, NULL, NULL);
 		vui_ctrl_end();
 	}
 }
 
-void vui_separator(VuiCtrlSibId sib_id) {
+void vui_separator(VuiCtrlSibId sib_id, const VuiSeparatorStyle* style) {
 	VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 	VuiBool is_row = parent->layout_type == VuiLayoutType_row;
 	vui_assert(is_row || parent->layout_type == VuiLayoutType_column, "vui_separator can only be used in a non-wrapping row or column layout");
-	vui_assert(!parent->attributes[VuiCtrlAttr_layout_wrap].bool_, "vui_separator can only be used in a non-wrapping row or column layout");
+	vui_assert(!parent->attributes.layout_wrap, "vui_separator can only be used in a non-wrapping row or column layout");
 
-	float size = parent->attributes[VuiCtrlAttr_separator_size].float_;
-	float width = is_row ? vui_fill_len : size;
-	float height = is_row ? size : vui_fill_len;
+	float width = is_row ? vui_fill_len : style->size;
+	float height = is_row ? style->size : vui_fill_len;
 
-	vui_scope_width(VuiCtrlState_default, width)
-	vui_scope_height(VuiCtrlState_default, height) {
-		vui_ctrl_start(sib_id, 0, 0);
+	vui_scope_width(width)
+	vui_scope_height(height) {
+		vui_ctrl_start_(sib_id, 0, 0, &style->ctrl, VuiSeparatorStyle_interp, NULL);
 		vui_ctrl_end();
 	}
 }
 
-VuiFocusState vui_button_start(VuiCtrlSibId sib_id) {
-	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_pressable;
-	vui_ctrl_start(sib_id, flags, 0);
+VuiFocusState vui_button_start(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_pressable, 0, NULL, VuiButtonStyle_interp, NULL);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-	return vui_ctrl_get(_vui.build.parent_ctrl_id)->focus_state;
+	//
+	// target the style that reflects the state of the control.
+	VuiCtrl_target_style(ctrl, &styles[VuiCtrl_state(ctrl)].ctrl);
+
+	return ctrl->focus_state;
 }
 
 void vui_button_end() {
 	vui_ctrl_end();
 }
 
-VuiFocusState vui_button(VuiCtrlSibId sib_id) {
-	VuiFocusState state = vui_button_start(sib_id);
+VuiFocusState vui_button(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiFocusState state = vui_button_start(sib_id, styles);
 	vui_button_end();
 	return state;
 }
 
-VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length) {
-	VuiFocusState state = vui_button_start(sib_id);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_text_(vui_sib_id, text, text_length, 0.f);
-	}
-	vui_button_end();
-	return state;
-}
-
-VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint) {
-	VuiFocusState state = vui_button_start(sib_id);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
-	}
-	vui_button_end();
-	return state;
-}
-
-VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
-	VuiFocusState state = vui_button_start(sib_id);
-	vui_column_layout();
-
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
-		vui_text_(vui_sib_id, text, text_length, 0.f);
-	}
-
-	vui_button_end();
-	return state;
-}
-
-VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed) {
-	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
-	vui_ctrl_start(sib_id, flags, pressed ? *pressed + 1 : 0);
-
+VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiFocusState state = vui_button_start(sib_id, styles);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
+	}
+
+	vui_button_end();
+	return state;
+}
+
+VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiFocusState state = vui_button_start(sib_id, styles);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the image
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
+	}
+	vui_button_end();
+	return state;
+}
+
+VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiFocusState state = vui_button_start(sib_id, styles);
+	vui_column_layout();
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the image and text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
+	}
+
+	vui_button_end();
+	return state;
+}
+
+VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, pressed ? *pressed + 1 : 0, NULL, VuiButtonStyle_interp, NULL);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// target the style that reflects the state of the control.
+	VuiCtrl_target_style(ctrl, &styles[VuiCtrl_state(ctrl)].ctrl);
+
 	VuiBool is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
 	if (pressed) *pressed = is_active;
 	return is_active;
@@ -1764,44 +2236,64 @@ void vui_toggle_button_end() {
 	vui_ctrl_end();
 }
 
-VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length) {
-	VuiBool p = vui_toggle_button_start(sib_id, pressed);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_text_(vui_sib_id, text, text_length, 0.f);
-	}
-	vui_toggle_button_end();
-	return p;
-}
-
-VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint) {
-	VuiBool p = vui_toggle_button_start(sib_id, pressed);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
-	}
-	vui_toggle_button_end();
-	return p;
-}
-
-VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
-	VuiBool p = vui_toggle_button_start(sib_id, pressed);
-	vui_column_layout();
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
-		vui_text_(vui_sib_id, text, text_length, 0.f);
-	}
-	vui_toggle_button_end();
-	return p;
-}
-
-VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
-	VuiCtrlFlags flags =
-		VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
-	vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
-
+VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_toggle_button_start(sib_id, pressed, styles);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
+	}
+	vui_toggle_button_end();
+	return p;
+}
+
+VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_toggle_button_start(sib_id, pressed, styles);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the image
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
+	}
+	vui_toggle_button_end();
+	return p;
+}
+
+VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_toggle_button_start(sib_id, pressed, styles);
+	vui_column_layout();
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the image and text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
+	}
+	vui_toggle_button_end();
+	return p;
+}
+
+VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, NULL, VuiButtonStyle_interp, NULL);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// target the style that reflects the state of the control.
+	VuiCtrl_target_style(ctrl, &styles[VuiCtrl_state(ctrl)].ctrl);
+
 	VuiBool is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
 	if (is_active) *selected_sib_id = sib_id;
 	return is_active;
@@ -1811,34 +2303,51 @@ void vui_select_button_end() {
 	vui_button_end();
 }
 
-VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length) {
-	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_text_(vui_sib_id, text, text_length, 0.f);
+VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_select_button_start(sib_id, selected_sib_id, styles);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
 	}
 	vui_select_button_end();
 	return p;
 }
 
-VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint) {
-	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
+VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_select_button_start(sib_id, selected_sib_id, styles);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+	//
+	// get the target style so we can use it for the imagetext
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
 	}
 	vui_select_button_end();
 	return p;
 }
 
-VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length) {
-	VuiBool p = vui_select_button_start(sib_id, selected_sib_id);
+VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]) {
+	VuiBool p = vui_select_button_start(sib_id, selected_sib_id, styles);
 	vui_column_layout();
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		vui_image(vui_sib_id, image_id, image_tint);
-		vui_text_(vui_sib_id, text, text_length, 0.f);
+	//
+	// get the target style so we can use it for the image and text
+	VuiButtonStyle* style = ctrl->target_style ? (VuiButtonStyle*)ctrl->target_style : (VuiButtonStyle*)ctrl->style;
+
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
 	}
 
 	vui_select_button_end();
@@ -1846,37 +2355,34 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 }
 
 
-VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked) {
+VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]) {
 	VuiBool is_active = vui_false;
-	vui_scope_width(VuiCtrlState_default, vui_auto_len)
-	vui_scope_height(VuiCtrlState_default, vui_auto_len) {
-		VuiCtrlFlags flags =
-			VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable;
-		vui_ctrl_start(sib_id, flags, checked ? *checked + 1 : 0);
+	vui_scope_width(vui_auto_len)
+	vui_scope_height(vui_auto_len) {
+		vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0, NULL, VuiCheckBoxStyle_interp, NULL);
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+		//
+		// target the style that reflects the state of the control.
+		const VuiCheckBoxStyle* style = &styles[VuiCtrl_state(ctrl)];
+		VuiCtrl_target_style(ctrl, &style->ctrl);
+
 		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
 		if (checked) *checked = is_active;
 
-		float check_size = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_size)->float_;
-		VuiColor check_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_color)->color;
-		vui_scope_bg_color(VuiCtrlState_default, check_color)
-		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_width(VuiCtrlState_default, check_size)
-		vui_scope_height(VuiCtrlState_default, check_size) {
-			VuiCtrlFlags checked_flags = is_active ? VuiCtrlFlags_background : 0;
-			vui_ctrl_start(vui_sib_id, checked_flags, 0);
+		vui_scope_width(style->check_size)
+		vui_scope_height(style->check_size) {
+			vui_ctrl_start_(vui_sib_id, 0, 0, NULL, NULL, VuiCheckBoxCheck_render);
 			vui_ctrl_end();
 		}
-
 
 		vui_ctrl_end();
 	}
 	return is_active;
 }
 
-VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
+VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0, NULL, NULL, NULL);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1884,24 +2390,32 @@ VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, u
 	if (!checked) checked = &c;
 
 	VuiBool state;
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_check_box(vui_sib_id, checked);
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		state = vui_check_box(vui_sib_id, checked, styles);
 		VuiCtrl* check_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+
+		//
+		// synchronize the active states between the check box and the parent
 		if (check_box->state_flags & VuiCtrlStateFlags_active) {
 			ctrl->state_flags |= VuiCtrlStateFlags_active;
 		} else {
 			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 		}
-		vui_text_(vui_sib_id, text, text_length, 0.f);
+
+		//
+		// get the target style so we can use it for the text
+		VuiCheckBoxStyle* style = check_box->target_style ? (VuiCheckBoxStyle*)check_box->target_style : (VuiCheckBoxStyle*)check_box->style;
+
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
 	}
 
 	vui_ctrl_end();
 	return state;
 }
 
-VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0);
+VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0, NULL, NULL, NULL);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1909,42 +2423,48 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 	if (!checked) checked = &c;
 
 	VuiBool state;
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_check_box(vui_sib_id, checked);
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		state = vui_check_box(vui_sib_id, checked, styles);
 		VuiCtrl* check_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+
+		//
+		// synchronize the active states between the check box and the parent
 		if (check_box->state_flags & VuiCtrlStateFlags_active) {
 			ctrl->state_flags |= VuiCtrlStateFlags_active;
 		} else {
 			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 		}
-		vui_image(vui_sib_id, image_id, image_tint);
+
+		//
+		// get the target style so we can use it for the image
+		VuiCheckBoxStyle* style = check_box->target_style ? (VuiCheckBoxStyle*)check_box->target_style : (VuiCheckBoxStyle*)check_box->style;
+
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
 	}
 
+	vui_ctrl_end();
 	return state;
 }
 
-VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
+VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]) {
 	VuiBool is_active = vui_false;
-	vui_scope_radius(VuiCtrlState_default, 100.f)
-	vui_scope_width(VuiCtrlState_default, vui_auto_len)
-	vui_scope_height(VuiCtrlState_default, vui_auto_len) {
-		VuiCtrlFlags flags =
-			VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable | VuiCtrlFlags_selectable;
-		vui_ctrl_start(sib_id, flags, (*selected_sib_id == sib_id) + 1);
+	vui_scope_width(vui_auto_len)
+	vui_scope_height(vui_auto_len) {
+		vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, NULL, VuiRadioButtonStyle_interp, NULL);
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+		//
+		// target the style that reflects the state of the control.
+		const VuiRadioButtonStyle* style = &styles[VuiCtrl_state(ctrl)];
+		VuiCtrl_target_style(ctrl, &style->ctrl);
+
 		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
 		if (is_active) *selected_sib_id = sib_id;
 
-		float check_size = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_size)->float_;
-		VuiColor check_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_check_color)->color;
-		vui_scope_bg_color(VuiCtrlState_default, check_color)
-		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_width(VuiCtrlState_default, check_size)
-		vui_scope_height(VuiCtrlState_default, check_size) {
-			VuiCtrlFlags checked_flags = is_active ? VuiCtrlFlags_background : 0;
-			vui_ctrl_start(vui_sib_id, checked_flags, 0);
+		vui_scope_width(style->check_size)
+		vui_scope_height(style->check_size) {
+			vui_ctrl_start_(vui_sib_id, 0, 0, NULL, NULL, VuiCheckBoxCheck_render);
 			vui_ctrl_end();
 		}
 
@@ -1954,8 +2474,8 @@ VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id) {
 	return is_active;
 }
 
-VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length) {
-	vui_ctrl_start(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
+VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, NULL, NULL, NULL);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1963,24 +2483,32 @@ VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	if (is_active) *selected_sib_id = sib_id;
 
 	VuiBool state;
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_radio_button(sib_id, selected_sib_id);
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		state = vui_radio_button(sib_id, selected_sib_id, styles);
 		VuiCtrl* radio_button = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+
+		//
+		// synchronize the active states between the check box and the parent
 		if (radio_button->state_flags & VuiCtrlStateFlags_active) {
 			ctrl->state_flags |= VuiCtrlStateFlags_active;
 		} else {
 			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 		}
-		vui_text_(vui_sib_id, text, text_length, 0.f);
+
+		//
+		// get the target style so we can use it for the text
+		VuiRadioButtonStyle* style = radio_button->target_style ? (VuiRadioButtonStyle*)radio_button->target_style : (VuiRadioButtonStyle*)radio_button->style;
+
+		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_style);
 	}
 
 	vui_ctrl_end();
 	return state;
 }
 
-VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint) {
-	vui_ctrl_start(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1);
+VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start_(sib_id + vui_sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, NULL, NULL, NULL);
 	vui_column_layout();
 
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
@@ -1988,38 +2516,41 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	if (is_active) *selected_sib_id = sib_id;
 
 	VuiBool state;
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_center) {
-		state = vui_radio_button(sib_id, selected_sib_id);
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_center) {
+		state = vui_radio_button(sib_id, selected_sib_id, styles);
 		VuiCtrl* radio_button = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+
+		//
+		// synchronize the active states between the check box and the parent
 		if (radio_button->state_flags & VuiCtrlStateFlags_active) {
 			ctrl->state_flags |= VuiCtrlStateFlags_active;
 		} else {
 			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
 		}
-		vui_image(vui_sib_id, image_id, image_tint);
+
+		//
+		// get the target style so we can use it for the image
+		VuiRadioButtonStyle* style = radio_button->target_style ? (VuiRadioButtonStyle*)radio_button->target_style : (VuiRadioButtonStyle*)radio_button->style;
+
+		vui_image(vui_sib_id, image_id, image_tint, style->image_style);
 	}
 
 	vui_ctrl_end();
 	return state;
 }
 
-void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max) {
+void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiProgressBarStyle* style) {
 	value = vui_clamp(value, min, max);
 	float ratio = (value - min) / (max - min);
 
-	vui_scope_layout_wrap(VuiCtrlState_default, vui_false)
-	vui_ctrl_start(sib_id, VuiCtrlFlags_background | VuiCtrlFlags_border, 0);
+	vui_scope_layout_wrap(vui_false)
+	vui_ctrl_start_(sib_id, 0, 0, &style->ctrl, VuiProgressBarStyle_interp, NULL);
 		vui_column_layout();
-		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-		VuiColor color = ctrl->attributes[VuiCtrlAttr_progress_bar_color].color;
-		vui_scope_width_ratio(VuiCtrlState_default, ratio)
-		vui_scope_height(VuiCtrlState_default, vui_fill_len)
-		vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-		vui_scope_bg_color(VuiCtrlState_default, color)
-		vui_ctrl_start(vui_sib_id, VuiCtrlFlags_background, 0);
+		vui_scope_width_ratio(ratio)
+		vui_scope_height(vui_fill_len)
+		vui_ctrl_start_(vui_sib_id, 0, 0, NULL, NULL, VuiProgressBar_render);
 		vui_ctrl_end();
 	vui_ctrl_end();
 }
@@ -2031,17 +2562,16 @@ void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_sc
 	// when a scroll bar is visible.
 	VuiVec2 container_size = VuiRect_size(ctrl->rect);
 	{
-		float scroll_view_border_width = ctrl->attributes[VuiCtrlAttr_border_width].float_;
-		container_size.x -= scroll_view_border_width * 2;
-		container_size.y -= scroll_view_border_width * 2;
+		const VuiScrollViewStyle* style = (VuiScrollViewStyle*)ctrl->style;
+		const VuiScrollBarStyle* bar_style = style->bar_style;
+		container_size.x -= style->border_width * 2;
+		container_size.y -= style->border_width * 2;
 
-		VuiThickness* scroll_bar_margin = &ctrl->attributes[VuiCtrlAttr_scroll_bar_margin].thickness;
-		float scroll_bar_width = ctrl->attributes[VuiCtrlAttr_scroll_bar_width].float_;
 		if (ctrl->flags & _VuiCtrlFlags_show_vertical_bar) {
-			container_size.x -= scroll_bar_width + VuiThickness_horizontal(scroll_bar_margin);
+			container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
 		}
 		if (ctrl->flags & _VuiCtrlFlags_show_horizontal_bar) {
-			container_size.y -= scroll_bar_width + VuiThickness_vertical(scroll_bar_margin);
+			container_size.y -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
 		}
 	}
 
@@ -2059,9 +2589,8 @@ void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_sc
 	}
 }
 
-void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags) {
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-	vui_ctrl_start(sib_id, flags | VuiCtrlFlags_background | VuiCtrlFlags_border, 0);
+void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiScrollViewStyle* style) {
+	vui_ctrl_start_(sib_id, flags, 0, &style->ctrl, VuiScrollViewStyle_interp, NULL);
 	VuiCtrlId scroll_view_ctrl_id = _vui.build.parent_ctrl_id;
 	VuiCtrl* ctrl = vui_ctrl_get(scroll_view_ctrl_id);
 
@@ -2074,29 +2603,30 @@ void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out,
 
 	if (size_in_out) {
 		ctrl->scroll_view_size = *size_in_out;
-	} else if (ctrl->scroll_view_size.x == 0.f && ctrl->scroll_view_size.y == 0.f) {
-		ctrl->scroll_view_size.x = ctrl->attributes[VuiCtrlAttr_width].float_;
-		ctrl->scroll_view_size.y = ctrl->attributes[VuiCtrlAttr_height].float_;
+	}
+
+	if (ctrl->scroll_view_size.x == 0.f && ctrl->scroll_view_size.y == 0.f) {
+		ctrl->scroll_view_size.x = ctrl->attributes.width;
+		ctrl->scroll_view_size.y = ctrl->attributes.height;
+		if (size_in_out) *size_in_out = ctrl->scroll_view_size;
 	}
 
 	//
 	// a resizable scroll view uses the ctrl->scroll_view_size field as it width and height
 	if (flags & VuiScrollFlags_resizable) {
-		ctrl->attributes[VuiCtrlAttr_width].float_ = ctrl->scroll_view_size.x;
-		ctrl->attributes[VuiCtrlAttr_height].float_ = ctrl->scroll_view_size.y;
+		ctrl->attributes.width = ctrl->scroll_view_size.x;
+		ctrl->attributes.height = ctrl->scroll_view_size.y;
 	}
 
 	//
 	// create the infinitely sized control to house the scrollable content.
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_width(VuiCtrlState_default, vui_auto_len)
-	vui_scope_height(VuiCtrlState_default, vui_auto_len)
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
-		vui_ctrl_start(-1, 0, 0);
-		ctrl = vui_ctrl_get(scroll_view_ctrl_id);
-		ctrl->scroll_content_id = _vui.build.parent_ctrl_id;
-	}
+	vui_scope_width(vui_auto_len)
+	vui_scope_height(vui_auto_len)
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_left_top)
+	vui_ctrl_start_(-1, 0, 0, NULL, NULL, NULL);
+	ctrl = vui_ctrl_get(scroll_view_ctrl_id);
+	ctrl->scroll_content_id = _vui.build.parent_ctrl_id;
 
 	//
 	// update the scroll offset with the value stored in the content_offset_in_out
@@ -2105,17 +2635,17 @@ void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out,
 	}
 }
 
-VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float container_length, float* content_offset_in_out, float content_length, VuiBool is_horizontal) {
+VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float container_length, float* content_offset_in_out, float content_length, VuiBool is_horizontal, const VuiScrollBarStyle* style) {
 	if (content_length < 1.0) content_length = 1.0;
-	vui_scope_width(VuiCtrlState_default, is_horizontal ? length : width)
-	vui_scope_height(VuiCtrlState_default, is_horizontal ? width : length)
-	vui_box_start(sib_id);
+	vui_scope_width(is_horizontal ? length : width)
+	vui_scope_height(is_horizontal ? width : length)
+	vui_ctrl_start(sib_id, &style->ctrl);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	//
 	// work out the slider size
 	VuiVec2 slider_size = VuiVec2_fill;
-	float bar_content_length = length - ctrl->attributes[VuiCtrlAttr_border_width].float_ * 2.f;
+	float bar_content_length = length - style->border_width * 2.f;
 	float* slider_long_side_length = NULL;
 	if (is_horizontal) {
 		slider_long_side_length = &slider_size.x;
@@ -2147,21 +2677,13 @@ VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float co
 	if (is_horizontal) slider_offset_vec.x = slider_offset;
 	else slider_offset_vec.y = slider_offset;
 
-    float slider_border_width = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_border_width].float_;
-    VuiColor slider_border_color = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_border_color].color;
-    VuiColor slider_bg_color = ctrl->attributes[VuiCtrlAttr_scroll_bar_slider_bg_color].color;
-
 	VuiBool offset_changed = vui_false;
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_width(VuiCtrlState_default, slider_size.x)
-	vui_scope_height(VuiCtrlState_default, slider_size.y)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
-	vui_scope_offset(VuiCtrlState_default, slider_offset_vec.x, slider_offset_vec.y)
-	vui_scope_bg_color(VuiCtrlState_default, slider_bg_color)
-	vui_scope_border_width(VuiCtrlState_default, slider_border_width)
-	vui_scope_border_color(VuiCtrlState_default, slider_border_color) {
-		VuiFocusState state = vui_button_start(vui_sib_id);
-		offset_changed = state == VuiFocusState_held || state == VuiFocusState_pressed;
+	vui_scope_width(slider_size.x)
+	vui_scope_height(slider_size.y)
+	vui_scope_align(VuiAlign_left_top)
+	vui_scope_offset(slider_offset_vec.x, slider_offset_vec.y) {
+		VuiFocusState state = vui_button_start(vui_sib_id, style->slider_style);
+		offset_changed = (state & VuiFocusState_held) == VuiFocusState_held;
 		if (offset_changed) {
 			float pos_offset = is_horizontal
 				? _vui.input.mouse.offset_x
@@ -2174,22 +2696,21 @@ VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float co
 		vui_button_end();
 	}
 
-	vui_box_end();
+	vui_ctrl_end();
 	return offset_changed;
 }
 
 void vui_scroll_view_end() {
 	vui_ctrl_end();
 
-	VuiCtrlId scroll_area_ctrl_id = _vui.build.parent_ctrl_id;
-	VuiCtrl* scroll_area = vui_ctrl_get(scroll_area_ctrl_id);
-	VuiCtrl* content = vui_ctrl_get(scroll_area->scroll_content_id);
+	VuiCtrlId scroll_view_ctrl_id = _vui.build.parent_ctrl_id;
+	VuiCtrl* scroll_view = vui_ctrl_get(scroll_view_ctrl_id);
+	VuiCtrl* content = vui_ctrl_get(scroll_view->scroll_content_id);
 	VuiVec2 content_size = VuiRect_size(content->rect);
-	VuiVec2 container_size = VuiRect_size(scroll_area->rect);
-	VuiThickness scroll_bar_margin = scroll_area->attributes[VuiCtrlAttr_scroll_bar_margin].thickness;
-	float scroll_bar_width = scroll_area->attributes[VuiCtrlAttr_scroll_bar_width].float_;
-	VuiCtrlFlags flags = scroll_area->flags;
-	float scroll_view_border_width = scroll_area->attributes[VuiCtrlAttr_border_width].float_;
+	VuiVec2 container_size = VuiRect_size(scroll_view->rect);
+	const VuiScrollViewStyle* style = (VuiScrollViewStyle*)scroll_view->style;
+	const VuiScrollBarStyle* bar_style = style->bar_style;
+	VuiCtrlFlags flags = scroll_view->flags;
 	VuiBool can_show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical;
 	VuiBool can_show_horizontal_bar = flags & VuiCtrlFlags_scrollable_vertical;
 	VuiBool show_vertical_bar = vui_false;
@@ -2199,18 +2720,18 @@ void vui_scroll_view_end() {
 	// and use this to workout the size of the container (the viewport of the scrollable content)
 	//
 	{
-		container_size.x -= scroll_view_border_width * 2;
-		container_size.y -= scroll_view_border_width * 2;
+		container_size.x -= style->border_width * 2;
+		container_size.y -= style->border_width * 2;
 
 		if (can_show_vertical_bar) {
 			show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical_always_show || content_size.y > container_size.y;
 		}
 
 		if (show_vertical_bar) {
-			container_size.x -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
-			scroll_area->flags |= _VuiCtrlFlags_show_vertical_bar;
+			container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+			scroll_view->flags |= _VuiCtrlFlags_show_vertical_bar;
 		} else {
-			scroll_area->flags &= ~_VuiCtrlFlags_show_vertical_bar;
+			scroll_view->flags &= ~_VuiCtrlFlags_show_vertical_bar;
 		}
 
 		if (can_show_horizontal_bar) {
@@ -2221,44 +2742,40 @@ void vui_scroll_view_end() {
 		}
 
 		if (show_horizontal_bar) {
-			container_size.y -= scroll_bar_width + VuiThickness_vertical(&scroll_bar_margin);
-			scroll_area->flags |= _VuiCtrlFlags_show_horizontal_bar;
+			container_size.y -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
+			scroll_view->flags |= _VuiCtrlFlags_show_horizontal_bar;
 
 			if (can_show_vertical_bar && !show_vertical_bar) {
 				show_vertical_bar = content_size.y > container_size.y;
 				if (show_vertical_bar) {
-					container_size.x -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
-					scroll_area->flags |= _VuiCtrlFlags_show_vertical_bar;
+					container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+					scroll_view->flags |= _VuiCtrlFlags_show_vertical_bar;
 				} else {
-					scroll_area->flags &= ~_VuiCtrlFlags_show_vertical_bar;
+					scroll_view->flags &= ~_VuiCtrlFlags_show_vertical_bar;
 				}
 			}
 
 		} else {
-			scroll_area->flags &= ~_VuiCtrlFlags_show_horizontal_bar;
+			scroll_view->flags &= ~_VuiCtrlFlags_show_horizontal_bar;
 		}
 	}
 
 	//
-	// WARNING: do not use the variable scroll_area past here.
+	// WARNING: do not use the variable scroll_view past here.
 	// copy the data out fo the scroll area, as when we start new controls
 	// they can reallocate the control pool and the pointer will be invalid.
-	float scroll_bar_border_width = scroll_area->attributes[VuiCtrlAttr_scroll_bar_border_width].float_;
-	VuiColor scroll_bar_border_color = scroll_area->attributes[VuiCtrlAttr_scroll_bar_border_color].color;
-	VuiColor scroll_bar_bg_color = scroll_area->attributes[VuiCtrlAttr_scroll_bar_bg_color].color;
-	float scroll_bar_radius = scroll_area->attributes[VuiCtrlAttr_scroll_bar_radius].float_;
-	VuiVec2 scroll_offset = scroll_area->scroll_offset;
-	VuiVec2 scroll_view_size = scroll_area->scroll_view_size;
+	VuiVec2 scroll_offset = scroll_view->scroll_offset;
+	VuiVec2 scroll_view_size = scroll_view->scroll_view_size;
 
 	//
 	// workout the long side lengths of the scroll bars
-	float scroll_bar_length_horizontal = scroll_view_size.x - VuiThickness_horizontal(&scroll_bar_margin) - scroll_view_border_width * 2;
-	float scroll_bar_length_vertical = scroll_view_size.y - VuiThickness_vertical(&scroll_bar_margin) - scroll_view_border_width * 2;
+	float scroll_bar_length_horizontal = scroll_view_size.x - VuiThickness_horizontal(&bar_style->margin) - style->border_width * 2;
+	float scroll_bar_length_vertical = scroll_view_size.y - VuiThickness_vertical(&bar_style->margin) - style->border_width * 2;
 	if (flags & VuiCtrlFlags_resizable || show_vertical_bar) {
-		scroll_bar_length_horizontal -= scroll_bar_width + VuiThickness_horizontal(&scroll_bar_margin);
+		scroll_bar_length_horizontal -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
 	}
 	if (flags & VuiCtrlFlags_resizable) {
-		scroll_bar_length_vertical -= scroll_bar_width + VuiThickness_vertical(&scroll_bar_margin);
+		scroll_bar_length_vertical -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
 	}
 
 	//
@@ -2266,67 +2783,66 @@ void vui_scroll_view_end() {
 	//
 	VuiFocusState state = VuiFocusState_none;
 	VuiBool offset_changed = vui_false;
-	vui_scope_border_width(VuiCtrlState_default, scroll_bar_border_width)
-	vui_scope_border_color(VuiCtrlState_default, scroll_bar_border_color)
-	vui_scope_padding(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_margin(VuiCtrlState_default, VuiThickness_zero)
-	vui_scope_radius(VuiCtrlState_default, scroll_bar_radius)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top)
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_layout_wrap(VuiCtrlState_default, vui_false)
-	vui_scope_layout_spacing(VuiCtrlState_default, 0.f)
-	vui_scope_layout_wrap_spacing(VuiCtrlState_default, 0.f)
-	vui_scope_bg_color(VuiCtrlState_default, scroll_bar_bg_color) {
+	vui_scope_align(VuiAlign_left_top)
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_layout_wrap(vui_false)
+	vui_scope_layout_spacing(0.f)
+	vui_scope_layout_wrap_spacing(0.f) {
 		if (show_horizontal_bar) {
-			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
-			vui_scope_align(VuiCtrlState_default, VuiAlign_left_bottom)
-				offset_changed = _vui_scroll_bar(-2, scroll_bar_width, scroll_bar_length_horizontal, container_size.x, &scroll_offset.x, content_size.x, vui_true);
+			vui_scope_align(VuiAlign_left_bottom)
+				offset_changed = _vui_scroll_bar(-2, bar_style->width, scroll_bar_length_horizontal, container_size.x, &scroll_offset.x, content_size.x, vui_true, bar_style);
 		}
 
 		if (show_vertical_bar) {
-			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
-			vui_scope_align(VuiCtrlState_default, VuiAlign_right_top)
-			offset_changed = _vui_scroll_bar(-3, scroll_bar_width, scroll_bar_length_vertical, container_size.y, &scroll_offset.y, content_size.y, vui_false);
+			vui_scope_align(VuiAlign_right_top)
+			offset_changed = _vui_scroll_bar(-3, bar_style->width, scroll_bar_length_vertical, container_size.y, &scroll_offset.y, content_size.y, vui_false, bar_style);
 		}
 
 		if (flags & VuiCtrlFlags_resizable) {
-			vui_scope_margin(VuiCtrlState_default, scroll_bar_margin)
-			vui_scope_align(VuiCtrlState_default, VuiAlign_right_bottom)
-			vui_scope_width(VuiCtrlState_default, scroll_bar_width)
-			vui_scope_height(VuiCtrlState_default, scroll_bar_width) {
-				state = vui_button(-4);
-				if (state == VuiFocusState_held || state == VuiFocusState_pressed) {
-					VuiVec2 min;
-					min.x = (VuiThickness_horizontal(&scroll_bar_margin) + scroll_bar_border_width + scroll_view_border_width + scroll_bar_width) * 2;
-					min.y = (VuiThickness_vertical(&scroll_bar_margin) + scroll_bar_border_width + scroll_view_border_width + scroll_bar_width) * 2;
+			vui_scope_width(bar_style->width)
+			vui_scope_height(bar_style->width)
+			vui_scope_align(VuiAlign_right_bottom)
+			vui_ctrl_start(-4, &bar_style->ctrl);
+			vui_scope_width(vui_fill_len)
+			vui_scope_height(vui_fill_len)
+			state = vui_button(-4, bar_style->slider_style);
+			vui_ctrl_end();
+			if (state & VuiFocusState_held) {
+				VuiVec2 min;
+				min.x = (VuiThickness_horizontal(&bar_style->margin) + bar_style->border_width + style->border_width + bar_style->width) * 2;
+				min.y = (VuiThickness_vertical(&bar_style->margin) + bar_style->border_width + style->border_width + bar_style->width) * 2;
 
-					scroll_view_size.x += _vui.input.mouse.offset_x;
-					scroll_view_size.y += _vui.input.mouse.offset_y;
-					scroll_view_size = VuiVec2_max(min, scroll_view_size);
-				}
+				scroll_view_size.x += _vui.input.mouse.offset_x;
+				scroll_view_size.y += _vui.input.mouse.offset_y;
+				scroll_view_size = VuiVec2_max(min, scroll_view_size);
 			}
 		}
 	}
 
 	//
-	// now store the data back into the scroll view as it could have change
-	// if the use interacted the scroll view.
+	// now store the data back into the scroll view as it could
+	// have changed if we interacted with the scroll view.
 	//
-	scroll_area = vui_ctrl_get(scroll_area_ctrl_id);
-	VuiCtrl_set_scroll_offset(scroll_area, scroll_offset, offset_changed);
-	scroll_area->scroll_view_size = scroll_view_size;
-	if ((vui_ctrl_is_mouse_scroll_focused(scroll_area->id) || state == VuiFocusState_held || state == VuiFocusState_pressed) && _vui.build.mouse_scroll_focused_size) {
+	scroll_view = vui_ctrl_get(scroll_view_ctrl_id);
+	VuiCtrl_set_scroll_offset(scroll_view, scroll_offset, offset_changed);
+	scroll_view->scroll_view_size = scroll_view_size;
+	if ((vui_ctrl_is_mouse_scroll_focused(scroll_view->id) || state == VuiFocusState_held || state == VuiFocusState_pressed) && _vui.build.mouse_scroll_focused_size) {
 		*_vui.build.mouse_scroll_focused_size = scroll_view_size;
 	}
 
 	vui_ctrl_end();
 }
 
-VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, _VuiInputBoxType type) {
-	VuiCtrlFlags flags = VuiCtrlFlags_background | VuiCtrlFlags_border | VuiCtrlFlags_focusable;
-	vui_ctrl_start(sib_id, flags, 0);
+VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT], _VuiInputBoxType type) {
+	vui_scope_height(vui_auto_len)
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable, 0, NULL, VuiTextBoxStyle_interp, NULL);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
-	float text_height = ctrl->attributes[VuiCtrlAttr_text_height].float_;
+
+	//
+	// target the style that reflects the state of the control.
+	const VuiTextBoxStyle* style = &styles[VuiCtrl_state(ctrl)];
+	const VuiTextStyle* text_style = style->text_style;
+	VuiCtrl_target_style(ctrl, &style->ctrl);
 
 	// let the input box (non text box) use the internal string buffer
 	if (vui_ctrl_is_focused(ctrl->id) && type != _VuiInputBoxType_text) {
@@ -2356,75 +2872,34 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 		}
 	}
 
-	vui_scope_offset(VuiCtrlState_default, 0.f, 0.f)
-	vui_scope_align(VuiCtrlState_default, VuiAlign_left_top) {
+	vui_scope_offset(0.f, 0.f)
+	vui_scope_align(VuiAlign_left_top) {
 		//
 		// the text of the text box
-		vui_text_(vui_sib_id, string_in_out, strlen(string_in_out), 0.f);
+		vui_text_(vui_sib_id, string_in_out, strlen(string_in_out), 0.f, text_style);
 
 		//
-		// if we are focused, render the cursor or selection box.
-		if (vui_ctrl_is_focused(ctrl->id)) {
-			VuiFontId font_id = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_font_id)->font_id;
-			float radius = 0.f;
-			VuiColor bg_color = {0};
-			float cursor_width = 0.f;
-
-			// get the offset to the cursor
-			VuiVec2 start_idx_offset = vui_get_text_size(string_in_out, _vui.input.focused_text_box.cursor_idx, 0.f, font_id, text_height);
-			if (_vui.input.focused_text_box.select_offset) {
-				//
-				// we are selecting so find the other end of the selection box
-				VuiVec2 end_idx_offset = vui_get_text_size(string_in_out,
-					_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset, 0.f, font_id, text_height);
-				if (_vui.input.focused_text_box.select_offset < 0) {
-					VuiVec2 tmp = end_idx_offset;
-					end_idx_offset = start_idx_offset;
-					start_idx_offset = tmp;
-				}
-
-				radius = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_selection_radius)->float_;
-				bg_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_selection_color)->color;
-				cursor_width = end_idx_offset.x - start_idx_offset.x;
-			} else {
-				//
-				// no selection, we have a cursor
-				radius = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_radius)->float_;
-				bg_color = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_color)->color;
-				cursor_width = _VuiCtrl_style_attr(ctrl, VuiCtrlAttr_text_cursor_width)->float_;
-
-				//
-				// evenly place the cursor in between two characters
-				if (_vui.input.focused_text_box.string_len > 0) {
-					start_idx_offset.x -= cursor_width / 2.f;
-				}
-			}
-
-			//
-			// place the cursor or selection box over the text
-			vui_scope_border_width(VuiCtrlState_default, 0.f)
-			vui_scope_bg_color(VuiCtrlState_default, bg_color)
-			vui_scope_offset(VuiCtrlState_default, start_idx_offset.x, 0.f)
-			vui_scope_width(VuiCtrlState_default, cursor_width)
-			vui_scope_height(VuiCtrlState_default, text_height)
-				vui_box(vui_sib_id);
-		}
+		// the control for the cursor
+		vui_scope_width(vui_fill_len)
+		vui_scope_height(vui_fill_len)
+		vui_ctrl_start_(vui_sib_id, 0, 0, NULL, NULL, VuiTextBoxCursor_render);
+		vui_ctrl_end();
 	}
 
 	vui_ctrl_end();
 	return has_changed;
 }
 
-VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap) {
+VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	vui_assert(string_in_out, "a string buffer must be provided");
-	return vui_text_box_(sib_id, string_in_out, string_in_out_cap, _VuiInputBoxType_text);
+	return vui_text_box_(sib_id, string_in_out, string_in_out_cap, styles, _VuiInputBoxType_text);
 }
 
-VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value) {
+VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%u", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, _VuiInputBoxType_u32);
+	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_u32);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -2434,11 +2909,11 @@ VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value) {
 	return has_changed;
 }
 
-VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value) {
+VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%d", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, _VuiInputBoxType_s32);
+	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_s32);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -2448,11 +2923,11 @@ VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value) {
 	return has_changed;
 }
 
-VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value) {
+VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%f", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, _VuiInputBoxType_float);
+	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_float);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -2518,7 +2993,6 @@ VuiBool vui_init(VuiSetup* setup) {
 	_vui.windows = vui_mem_alloc_array(_VuiWindow, _vui.allocator, setup->windows_count);
 	memset(_vui.windows, 0, setup->windows_count * sizeof(*_vui.windows));
 	_vui.windows_count = setup->windows_count;
-	_vui.build.style = setup->style;
 	return vui_true;
 }
 
@@ -2587,7 +3061,6 @@ void vui_frame_start(VuiBool right_to_left) {
 			scroll_focused_ctrl->scroll_offset.y + _vui.input.mouse.wheel_offset_y);
 		VuiCtrl_set_scroll_offset(scroll_focused_ctrl, scroll_offset, vui_false);
 	}
-
 
 	//
 	// process the keyboard input for the focused text/input box
@@ -2726,16 +3199,17 @@ void vui_frame_end() {
 			//
 			// find the previous control in the tree that is focusable.
 			while (ctrl) {
-				// while we have no previous siblings navigate up the parent;
-				while (ctrl && ctrl->sibling_prev_id == 0) {
-					ctrl = vui_ctrl_get(ctrl->parent_id);
+				if (ctrl->sibling_prev_id == 0) {
+					// we have no previous siblings, navigate up the parent
+					ctrl = vui_ctrl_try_get(ctrl->parent_id);
+					if (!ctrl) break;
+				} else {
+					// goto the previous sibling
+					ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
+					// descend to the most last child of the sibling
+					while (ctrl->child_last_id) ctrl = vui_ctrl_get(ctrl->child_last_id);
 				}
-				if (!ctrl) break;
 
-				// goto the previous sibling
-				ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
-				// no descend to the most last child
-				while (ctrl->child_last_id) ctrl = vui_ctrl_get(ctrl->child_last_id);
 				if (ctrl->flags & VuiCtrlFlags_focusable)
 					break;
 			}
@@ -2766,7 +3240,7 @@ void vui_frame_end() {
 					ctrl = vui_ctrl_get(ctrl->sibling_next_id);
 				} else { // else go up the parent controls until they have a next sibling.
 					while (ctrl) {
-						ctrl = vui_ctrl_get(ctrl->parent_id);
+						ctrl = vui_ctrl_try_get(ctrl->parent_id);
 						if (ctrl && ctrl->sibling_next_id) {
 							ctrl = vui_ctrl_get(ctrl->sibling_next_id);
 							break;
@@ -2824,14 +3298,12 @@ void vui_window_start(VuiWindowId id, VuiVec2 size) {
 	}
 	root_ctrl->last_frame_idx = _vui.build.frame_idx;
 
-	//
-	// copy over the attributes.
-	//
-	for (VuiCtrlAttr attr = 0; attr < VuiCtrlAttr_COUNT; attr += 1) {
-		root_ctrl->attributes[attr] = *_VuiCtrl_style_attr(root_ctrl, attr);
-	}
-	root_ctrl->attributes[VuiCtrlAttr_width].float_ = size.x;
-	root_ctrl->attributes[VuiCtrlAttr_height].float_ = size.y;
+	root_ctrl->attributes = _vui.build.ctrl_attrs;
+	root_ctrl->attributes.width = size.x;
+	root_ctrl->attributes.height = size.y;
+
+	_vui.build.ctrl_attrs.width = vui_auto_len;
+	_vui.build.ctrl_attrs.height = vui_auto_len;
 
 	_vui.build.parent_ctrl_id = root_ctrl->id;
 	_vui.build.sibling_prev_ctrl_id = 0;
@@ -2870,8 +3342,7 @@ void _vui_layout_column_row(
 	VuiCtrl* ctrl, VuiBool is_column, float inner_x, float inner_y, float inner_width, float inner_height,
 	VuiVec2* max_inner_right_bottom_ptr, VuiRect* child_placement_area_ptr
 ) {
-	VuiCtrlAttr dir_attr = 0;
-	VuiCtrlAttr wrap_dir_attr = 0;
+	uint16_t dir_size_offset = 0;
 	float (*dir_rect_len)(const VuiRect*) = NULL;
 	float (*wrap_dir_rect_len)(const VuiRect*) = NULL;
 	float inner_dir_offset = 0.f;
@@ -2893,8 +3364,7 @@ void _vui_layout_column_row(
 		inner_wrap_dir_offset = inner_y;
 		inner_dir_len = inner_width;
 		inner_wrap_dir_len = inner_height;
-		dir_attr = VuiCtrlAttr_width;
-		wrap_dir_attr = VuiCtrlAttr_height;
+		dir_size_offset = offsetof(VuiCtrlAttrs, width);
 		wrap_dir_rect_len = VuiRect_height;
 		fill_portion_dir_len_ptr = &_vui.build.fill_portion_width;
 		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_height;
@@ -2911,8 +3381,7 @@ void _vui_layout_column_row(
 		inner_wrap_dir_offset = inner_x;
 		inner_dir_len = inner_height;
 		inner_wrap_dir_len = inner_width;
-		dir_attr = VuiCtrlAttr_height;
-		wrap_dir_attr = VuiCtrlAttr_width;
+		dir_size_offset = offsetof(VuiCtrlAttrs, height);
 		dir_rect_len = VuiRect_height;
 		fill_portion_dir_len_ptr = &_vui.build.fill_portion_height;
 		fill_portion_wrap_dir_len_ptr = &_vui.build.fill_portion_width;
@@ -2926,8 +3395,8 @@ void _vui_layout_column_row(
 	float wrap_spacing = 0.f;
 	VuiBool wrap = vui_false;
 	if (inner_dir_len != vui_auto_len) {
-		wrap_spacing = ctrl->attributes[VuiCtrlAttr_layout_wrap_spacing].float_;
-		wrap = ctrl->attributes[VuiCtrlAttr_layout_wrap].bool_;
+		wrap_spacing = ctrl->attributes.layout_wrap_spacing;
+		wrap = ctrl->attributes.layout_wrap;
 	}
 
 	//
@@ -2941,7 +3410,7 @@ void _vui_layout_column_row(
 		VuiCtrl* child = NULL;
 		for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 			child = vui_ctrl_get(child_id);
-			if (child->attributes[dir_attr].float_ == vui_auto_len) {
+			if (*(float*)vui_ptr_add(&child->attributes, dir_size_offset) == vui_auto_len) {
 				_vui_layout_ctrls(child, child_placement_area_ptr, inner_dir_len, inner_wrap_dir_len);
 				total_auto_dir_lens += dir_rect_len(&child->rect);
 			}
@@ -2956,7 +3425,7 @@ void _vui_layout_column_row(
 		uint32_t fill_ctrls_count = 0;
 		for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 			child = vui_ctrl_get(child_id);
-			float child_dir_len = child->attributes[dir_attr].float_;
+			float child_dir_len = *(float*)vui_ptr_add(&child->attributes, dir_size_offset);
 			if (child_dir_len == vui_auto_len) {
 				continue;
 			} else if (child_dir_len == vui_fill_len) {
@@ -2966,7 +3435,8 @@ void _vui_layout_column_row(
 				float ratio = -child_dir_len;
 				available_dir_len -= inner_dir_len * ratio;
 			} else {
-				available_dir_len -= child_dir_len + margin_dir_len(&child->attributes[VuiCtrlAttr_margin].thickness);
+				VuiThickness margin = VuiCtrl_interp_margin(child);
+				available_dir_len -= child_dir_len + margin_dir_len(&margin);
 			}
 		}
 
@@ -2998,7 +3468,7 @@ void _vui_layout_column_row(
 		layout_inner_height = vui_auto_len;
 	}
 
-	float layout_spacing = ctrl->attributes[VuiCtrlAttr_layout_spacing].float_;
+	float layout_spacing = ctrl->attributes.layout_spacing;
 	while (child) {
 		VuiCtrl* child_line_start = child;
 		*fill_portion_wrap_dir_len_ptr = 0.f;
@@ -3080,8 +3550,8 @@ void _vui_layout_column_row(
 			_vui_layout_ctrls(line_child, child_placement_area_ptr, line_inner_width, line_inner_height);
 
 			//
-			// advance to the next cell
-			*child_placement_area_dir_len_start = *child_placement_area_dir_len_end + layout_spacing;
+			// advance to the next cell, recalculate the end as it can be different this time.
+			*child_placement_area_dir_len_start = *child_placement_area_dir_len_start + dir_rect_len(&line_child->rect) + layout_spacing;
 		}
 
 		// advance to the new line
@@ -3109,8 +3579,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 		return;
 	}
 
-	const VuiThickness* margin = &ctrl->attributes[VuiCtrlAttr_margin].thickness;
-	const VuiThickness* padding = &ctrl->attributes[VuiCtrlAttr_padding].thickness;
+	VuiCtrlStyle style = {0};
+	if (ctrl->style) {
+		if (ctrl->target_style) {
+			VuiCtrlStyle_interp(&style, ctrl->target_style, ctrl->style, ctrl->interp_ratio);
+		} else {
+			style = *ctrl->style;
+		}
+	}
 
 	float parent_fill_portion_width = _vui.build.fill_portion_width;
 	float parent_fill_portion_height = _vui.build.fill_portion_height;
@@ -3136,16 +3612,15 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	}
 	ctrl->rect.top = placement_area->top;
 
-	float border_width = ctrl->flags & VuiCtrlFlags_border ? ctrl->attributes[VuiCtrlAttr_border_width].float_ : 0.f;
 	float inner_x = (_vui.flags & _VuiFlags_right_to_left)
-		? margin->right + padding->right + border_width
-		: margin->left + padding->left + border_width;
-	float inner_y = margin->top + padding->top + border_width;
+		? style.margin.right + style.padding.right + style.border_width
+		: style.margin.left + style.padding.left + style.border_width;
+	float inner_y = style.margin.top + style.padding.top + style.border_width;
 	float inner_width = vui_auto_len;
 	float inner_height = vui_auto_len;
 
 	{
-		float width = ctrl->attributes[VuiCtrlAttr_width].float_;
+		float width = ctrl->attributes.width;
 
 		//
 		// if (is ratio or fill) and parent is not calculated, then default to automatic sizing
@@ -3165,7 +3640,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				float ratio = -width;
 				outer_width = parent_inner_width * ratio;
 			} else {
-				outer_width = width + (margin->left + margin->right);
+				outer_width = width + (style.margin.left + style.margin.right);
 			}
 
 			if (_vui.flags & _VuiFlags_right_to_left) {
@@ -3173,12 +3648,12 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 			} else {
 				ctrl->rect.right = ctrl->rect.left + outer_width;
 			}
-			inner_width = outer_width - (margin->left + margin->right) - (padding->left + padding->right) - border_width * 2;
+			inner_width = outer_width - (style.margin.left + style.margin.right) - (style.padding.left + style.padding.right) - style.border_width * 2;
 		}
 	}
 
 	{
-		float height = ctrl->attributes[VuiCtrlAttr_height].float_;
+		float height = ctrl->attributes.height;
 		//
 		// if (is ratio or fill) and parent is not calculated, then default to automatic sizing
 		//
@@ -3197,11 +3672,11 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				float ratio = -height;
 				outer_height = parent_inner_height * ratio;
 			} else {
-				outer_height = height + (margin->top + margin->bottom);
+				outer_height = height + (style.margin.top + style.margin.bottom);
 			}
 
 			ctrl->rect.bottom = ctrl->rect.top + outer_height;
-			inner_height = outer_height - (margin->top + margin->bottom) - (padding->top + padding->bottom) - border_width * 2;
+			inner_height = outer_height - (style.margin.top + style.margin.bottom) - (style.padding.top + style.padding.bottom) - style.border_width * 2;
 		}
 	}
 
@@ -3238,7 +3713,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 				// resolve the dimensions with automatic lengths
 				//
 				if (inner_width == vui_auto_len) {
-					float outer_width = max_width + (padding->left + padding->right) + (border_width * 2) + (margin->left + margin->right);
+					float outer_width = max_width + (style.padding.left + style.padding.right) + (style.border_width * 2) + (style.margin.left + style.margin.right);
 					if (_vui.flags & _VuiFlags_right_to_left) {
 						ctrl->rect.left = ctrl->rect.right + outer_width;
 					} else {
@@ -3247,7 +3722,7 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 					inner_width = max_width;
 				}
 				if (inner_height == vui_auto_len) {
-					ctrl->rect.bottom = ctrl->rect.top + max_height + (padding->top + padding->bottom) + (border_width * 2) + (margin->top + margin->bottom);
+					ctrl->rect.bottom = ctrl->rect.top + max_height + (style.padding.top + style.padding.bottom) + (style.border_width * 2) + (style.margin.top + style.margin.bottom);
 					inner_height = max_height;
 				}
 			}
@@ -3287,13 +3762,30 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	//
 	if (inner_width == vui_auto_len) {
 		if (_vui.flags & _VuiFlags_right_to_left) {
-			ctrl->rect.left = ctrl->rect.right + max_inner_right_bottom.x + padding->left + border_width + margin->left;
+			ctrl->rect.left = ctrl->rect.right + max_inner_right_bottom.x + style.padding.left + style.border_width + style.margin.left;
 		} else {
-			ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + padding->right + border_width + margin->right;
+			ctrl->rect.right = ctrl->rect.left + max_inner_right_bottom.x + style.padding.right + style.border_width + style.margin.right;
 		}
 	}
 	if (inner_height == vui_auto_len) {
-		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + padding->bottom + border_width + margin->bottom;
+		ctrl->rect.bottom = ctrl->rect.top + max_inner_right_bottom.y + style.padding.bottom + style.border_width + style.margin.bottom;
+	}
+
+	//
+	// if the scroll view has been initialized with vui_fill_len or vui_auto_len.
+	// then store the calculated size in ctrl->scroll_view_size.
+	if (ctrl->flags & VuiCtrlFlags_scrollable_horizontal | VuiCtrlFlags_scrollable_vertical) {
+		if (ctrl->attributes.width == vui_fill_len || ctrl->attributes.width == vui_auto_len) {
+			ctrl->scroll_view_size.x = VuiRect_width(&ctrl->rect) - VuiThickness_horizontal(&style.margin);
+			if (vui_ctrl_is_mouse_scroll_focused(ctrl->id) && _vui.build.mouse_scroll_focused_size)
+				*_vui.build.mouse_scroll_focused_size = ctrl->scroll_view_size;
+		}
+
+		if (ctrl->attributes.height == vui_fill_len || ctrl->attributes.height == vui_auto_len) {
+			ctrl->scroll_view_size.y = VuiRect_height(&ctrl->rect) - VuiThickness_vertical(&style.margin);
+			if (vui_ctrl_is_mouse_scroll_focused(ctrl->id) && _vui.build.mouse_scroll_focused_size)
+				*_vui.build.mouse_scroll_focused_size = ctrl->scroll_view_size;
+		}
 	}
 
 	//
@@ -3302,8 +3794,8 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 	VuiVec2 placement_size = VuiRect_size(*placement_area);
 	if (placement_size.x > 0.f && placement_size.y > 0.f) {
 		VuiVec2 size = VuiRect_size(ctrl->rect);
-		VuiVec2 offset = ctrl->attributes[VuiCtrlAttr_offset].vec2;
-		VuiAlign align = ctrl->attributes[VuiCtrlAttr_align].align;
+		VuiVec2 offset = ctrl->attributes.offset;
+		VuiAlign align = ctrl->attributes.align;
 
 		switch (align) {
 			case VuiAlign_left_top: break;
@@ -3366,11 +3858,11 @@ void _vui_layout_ctrls_finalize(VuiCtrl* ctrl, VuiVec2 offset, float root_width)
 
 	//
 	// make the outer rectangle the actual rectangle of the control by applying the margin.
-	const VuiThickness* margin = &ctrl->attributes[VuiCtrlAttr_margin].thickness;
-	ctrl->rect.left += margin->left;
-	ctrl->rect.top += margin->top;
-	ctrl->rect.right -= margin->right;
-	ctrl->rect.bottom -= margin->bottom;
+	VuiThickness margin = VuiCtrl_interp_margin(ctrl);
+	ctrl->rect.left += margin.left;
+	ctrl->rect.top += margin.top;
+	ctrl->rect.right -= margin.right;
+	ctrl->rect.bottom -= margin.bottom;
 
 	VuiCtrl* child = NULL;
 	for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
@@ -3449,8 +3941,8 @@ void vui_window_end() {
 	vui_assert(root->parent_id == 0, "cannot end the window without ending all of it's child controls");
 	vui_ctrl_end();
 
-	float width = root->attributes[VuiCtrlAttr_width].float_;
-	float height = root->attributes[VuiCtrlAttr_height].float_;
+	float width = root->attributes.width;
+	float height = root->attributes.height;
 	VuiRect placement_area = VuiRect_init_wh(0.f, 0.f, 0.f, 0.f);
 
 	_vui_layout_ctrls(root, &placement_area, width, height);
@@ -3463,7 +3955,7 @@ void vui_window_end() {
 	VuiCtrl* child = NULL;
 	for (VuiCtrlId child_id = root->child_first_id; child_id; child_id = child->sibling_next_id) {
 		child = vui_ctrl_get(child_id);
-		_vui_layout_ctrls_finalize(child, (VuiVec2){0}, root->attributes[VuiCtrlAttr_width].float_);
+		_vui_layout_ctrls_finalize(child, (VuiVec2){0}, root->attributes.width);
 	}
 
 #if VUI_DEBUG_CTRL_LAYOUT
@@ -3480,58 +3972,52 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 	VuiRect inner_rect = ctrl->rect;
 	_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
 
-	if (flags & VuiCtrlFlags_background) {
-		VuiColor color = ctrl->attributes[VuiCtrlAttr_bg_color].color;
-		float radius = ctrl->attributes[VuiCtrlAttr_radius].float_;
-		if (flags & VuiCtrlFlags_border) {
-			float half_width = ctrl->attributes[VuiCtrlAttr_border_width].float_ / 2.f;
-			inner_rect.left += half_width;
-			inner_rect.top += half_width;
-			inner_rect.bottom -= half_width;
-			inner_rect.right -= half_width;
+	if (ctrl->style) {
+		if (ctrl->target_style) {
+			ctrl->style_interp_fn(&_vui.style, ctrl->target_style, ctrl->style, ctrl->interp_ratio);
+		} else {
+			ctrl->style_interp_fn(&_vui.style, ctrl->style, ctrl->style, ctrl->interp_ratio);
 		}
-		vui_render_rect(&inner_rect, color, radius);
-		if (flags & VuiCtrlFlags_border) {
-			float half_width = ctrl->attributes[VuiCtrlAttr_border_width].float_ / 2.f;
-			inner_rect.left -= half_width;
-			inner_rect.top -= half_width;
-			inner_rect.bottom += half_width;
-			inner_rect.right += half_width;
+	} else {
+		memset(_vui.style_buf, 0, sizeof(_vui.style_buf));
+	}
+
+	float border_width_half = _vui.style.border_width / 2.0;
+	if (_vui.style.bg_color.a) {
+		if (_vui.style.border_width) {
+			inner_rect.left += border_width_half;
+			inner_rect.top += border_width_half;
+			inner_rect.bottom -= border_width_half;
+			inner_rect.right -= border_width_half;
+		}
+		vui_render_rect(&inner_rect, _vui.style.bg_color, _vui.style.radius);
+		if (_vui.style.border_width) {
+			inner_rect.left -= border_width_half;
+			inner_rect.top -= border_width_half;
+			inner_rect.bottom += border_width_half;
+			inner_rect.right += border_width_half;
 		}
 	}
 
-	if (flags & VuiCtrlFlags_border) {
-		VuiColor color = ctrl->attributes[VuiCtrlAttr_border_color].color;
-		float width = ctrl->attributes[VuiCtrlAttr_border_width].float_;
-		float radius = ctrl->attributes[VuiCtrlAttr_radius].float_;
-		vui_render_rect_border(&ctrl->rect, color, radius, width);
+	if (_vui.style.border_width) {
+		vui_render_rect_border(&ctrl->rect, _vui.style.border_color, _vui.style.radius, _vui.style.border_width);
 
-		inner_rect.left += width;
-		inner_rect.top += width;
-		inner_rect.bottom -= width;
-		inner_rect.right -= width;
+		inner_rect.left += _vui.style.border_width;
+		inner_rect.top += _vui.style.border_width;
+		inner_rect.bottom -= _vui.style.border_width;
+		inner_rect.right -= _vui.style.border_width;
 		_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
 	}
 
-	if (flags & _VuiCtrlFlags_image) {
-		VuiImageScaleMode scale_mode = ctrl->attributes[VuiCtrlAttr_image_scale_mode].image_scale_mode;
-		vui_render_image(&ctrl->rect, ctrl->image_id, ctrl->image_tint, scale_mode);
-	}
-
-	if (flags & _VuiCtrlFlags_text) {
-		VuiFontId font_id = ctrl->attributes[VuiCtrlAttr_text_font_id].font_id;
-		char* text = &_vui.render.w->text[ctrl->text_start_idx];
-		VuiColor color = ctrl->attributes[VuiCtrlAttr_text_color].color;
-		float text_height = ctrl->attributes[VuiCtrlAttr_text_height].float_;
-		vui_render_text(ctrl->rect.left_top, font_id, text_height, text, ctrl->text_length, color, ctrl->text_wrap_width);
-	}
-
-	const VuiThickness* padding = &ctrl->attributes[VuiCtrlAttr_padding].thickness;
-	inner_rect.left += padding->left;
-	inner_rect.top += padding->top;
-	inner_rect.bottom -= padding->bottom;
-	inner_rect.right -= padding->right;
+	inner_rect.left += _vui.style.padding.left;
+	inner_rect.top += _vui.style.padding.top;
+	inner_rect.bottom -= _vui.style.padding.bottom;
+	inner_rect.right -= _vui.style.padding.right;
 	_vui.render.clip_rect = VuiRect_clip(&_vui.render.clip_rect, &inner_rect);
+
+	if (ctrl->render_fn) {
+		ctrl->render_fn(ctrl, &_vui.style, &inner_rect);
+	}
 
 	//
 	// now render the children;
