@@ -781,7 +781,7 @@ struct VuiScrollBarStyle {
 		VuiCtrlStyle ctrl;
 	};
 	const VuiButtonStyle* slider_style; // points to an array of styles, one for for each VuiCtrlState value
-	float width;
+	float slider_width;
 };
 
 extern void VuiScrollBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
@@ -825,7 +825,7 @@ extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to,
 #define vui_radius_default 4.f
 #define vui_line_height_header 32.f
 #define vui_line_height_menu 32.f
-#define vui_scroll_bar_width_default 24.f
+#define vui_scroll_bar_width_default 18.f
 #define vui_separator_size_default 4.f
 #define vui_check_size_default 20.f
 #define vui_cursor_width_default 2.f

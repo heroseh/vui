@@ -1313,7 +1313,7 @@ VuiStyleSheet vui_ss = {
 	},
 	.scroll_view = {
 		.margin = vui_margin_default,
-		.padding = {0},
+		.padding = vui_padding_default,
 		.bg_color = vui_color_midnight_blue,
 		.border_color = vui_color_wet_asphalt,
 		.border_width = vui_border_width_default,
@@ -1322,13 +1322,13 @@ VuiStyleSheet vui_ss = {
 	},
 	.scroll_bar = {
 		.margin = vui_margin_default,
-		.padding = {0},
+		.padding = vui_padding_default,
 		.bg_color = vui_color_midnight_blue,
 		.border_color = vui_color_wet_asphalt,
 		.border_width = vui_border_width_default,
 		.radius = vui_radius_default,
 		.slider_style = vui_ss.scroll_bar_slider,
-		.width = vui_scroll_bar_width_default,
+		.slider_width = vui_scroll_bar_width_default,
 	},
 	.scroll_bar_slider = {
 		[VuiCtrlState_default] = {
@@ -2564,14 +2564,23 @@ void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_sc
 	{
 		const VuiScrollViewStyle* style = (VuiScrollViewStyle*)ctrl->style;
 		const VuiScrollBarStyle* bar_style = style->bar_style;
-		container_size.x -= style->border_width * 2;
-		container_size.y -= style->border_width * 2;
+		const VuiButtonStyle* button_style = bar_style->slider_style;
+		container_size.x -= style->border_width * 2.f + VuiThickness_horizontal(&style->padding);
+		container_size.y -= style->border_width * 2.f + VuiThickness_vertical(&style->padding);
 
 		if (ctrl->flags & _VuiCtrlFlags_show_vertical_bar) {
-			container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+			//
+			// we have a vertical scroll bar, so remove the outer width of the control from the container's width
+			container_size.x -= bar_style->slider_width +
+				VuiThickness_horizontal(&bar_style->margin) + VuiThickness_horizontal(&bar_style->padding) +
+				bar_style->border_width * 2.f + VuiThickness_horizontal(&button_style->margin);
 		}
 		if (ctrl->flags & _VuiCtrlFlags_show_horizontal_bar) {
-			container_size.y -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
+			//
+			// we have a horizontal scroll bar, so remove the outer height of the control from the container's height
+			container_size.y -= bar_style->slider_width +
+				VuiThickness_vertical(&bar_style->margin) + VuiThickness_vertical(&bar_style->padding) +
+				bar_style->border_width * 2.f + VuiThickness_vertical(&button_style->margin);
 		}
 	}
 
@@ -2635,30 +2644,44 @@ void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out,
 	}
 }
 
-VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float container_length, float* content_offset_in_out, float content_length, VuiBool is_horizontal, const VuiScrollBarStyle* style) {
-	if (content_length < 1.0) content_length = 1.0;
-	vui_scope_width(is_horizontal ? length : width)
-	vui_scope_height(is_horizontal ? width : length)
+//
+// @param length:
+//     the length of the long side of the scroll bar control. this excludes the margin.
+//     e.g. for a vertical bar, this will be the height of the control.
+//
+// @param container_length:
+//     the length of the long side of the viewport of the scrollable content.
+//     e.g. for a vertical bar, this will be the height of the viewable area of the scroll area.
+//
+VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float length, float container_length, float* content_offset_in_out, float content_length, VuiBool is_horizontal, const VuiScrollBarStyle* style) {
+	if (content_length < 1.f) content_length = 1.f;
+	vui_scope_width(is_horizontal ? length : vui_auto_len)
+	vui_scope_height(is_horizontal ? vui_auto_len : length)
 	vui_ctrl_start(sib_id, &style->ctrl);
 	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	//
 	// work out the slider size
-	VuiVec2 slider_size = VuiVec2_fill;
+	VuiVec2 slider_size = VuiVec2_init(style->slider_width, style->slider_width);
 	float bar_content_length = length - style->border_width * 2.f;
 	float* slider_long_side_length = NULL;
+	float (*thickness_dir_len_fn)(const VuiThickness*) = NULL;
 	if (is_horizontal) {
 		slider_long_side_length = &slider_size.x;
+		thickness_dir_len_fn = VuiThickness_horizontal;
+		bar_content_length -= VuiThickness_horizontal(&style->padding);
 	} else {
 		slider_long_side_length = &slider_size.y;
+		thickness_dir_len_fn = VuiThickness_vertical;
+		bar_content_length -= VuiThickness_vertical(&style->padding);
 	}
 
-	float min_slider_len = width;
+	float min_slider_len = style->slider_width;
 	// calculate the long side length of the slider that is clamp to a min(min_slider_len) and vui_max(bar_content_length)
 	float unclamped_slider_len = bar_content_length * container_length / content_length;
 	float slider_len = vui_min(bar_content_length, vui_max(min_slider_len, unclamped_slider_len));
 
-	*slider_long_side_length = slider_len;
+	*slider_long_side_length = slider_len - thickness_dir_len_fn(&style->slider_style->margin);
 
 	//
 	// work out the slider offset
@@ -2673,7 +2696,7 @@ VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float co
 	// convert content offset into a slider offset
 	// content_offset is always <= 0 and slider_offset is >= 0
 	float slider_offset = ((-*content_offset_in_out / content_length) * (bar_content_length * max_slider_offset_clamp_ratio));
-	slider_offset = vui_max(0.0, vui_min(slider_offset, max_slider_offset));
+	slider_offset = vui_max(0.f, vui_min(slider_offset, max_slider_offset));
 	if (is_horizontal) slider_offset_vec.x = slider_offset;
 	else slider_offset_vec.y = slider_offset;
 
@@ -2690,7 +2713,7 @@ VuiBool _vui_scroll_bar(VuiCtrlSibId sib_id, float width, float length, float co
 				: _vui.input.mouse.offset_y;
 
 			// offset the slider offset and convert the offset into a content offset
-			slider_offset = vui_max(0.0, vui_min(slider_offset + pos_offset, max_slider_offset));
+			slider_offset = vui_max(0.f, vui_min(slider_offset + pos_offset, max_slider_offset));
 			*content_offset_in_out = max_slider_offset_clamp_ratio == 0.f ? 0.f : -(slider_offset / (bar_content_length * max_slider_offset_clamp_ratio)) * content_length;
 		}
 		vui_button_end();
@@ -2710,25 +2733,36 @@ void vui_scroll_view_end() {
 	VuiVec2 container_size = VuiRect_size(scroll_view->rect);
 	const VuiScrollViewStyle* style = (VuiScrollViewStyle*)scroll_view->style;
 	const VuiScrollBarStyle* bar_style = style->bar_style;
+	const VuiButtonStyle* slider_style = bar_style->slider_style;
 	VuiCtrlFlags flags = scroll_view->flags;
 	VuiBool can_show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical;
 	VuiBool can_show_horizontal_bar = flags & VuiCtrlFlags_scrollable_vertical;
 	VuiBool show_vertical_bar = vui_false;
 	VuiBool show_horizontal_bar = vui_false;
+
+	float vertical_scroll_bar_outer_width = bar_style->slider_width +
+		VuiThickness_horizontal(&bar_style->margin) + VuiThickness_horizontal(&bar_style->padding) +
+		bar_style->border_width * 2.f + VuiThickness_horizontal(&bar_style->slider_style->margin);
+
+	float horizontal_scroll_bar_outer_height = bar_style->slider_width +
+		VuiThickness_vertical(&bar_style->margin) + VuiThickness_vertical(&bar_style->padding) +
+		bar_style->border_width * 2.f + VuiThickness_vertical(&bar_style->slider_style->margin);
+
+
 	//
 	// determine whether each of the scroll bars are visible or not.
 	// and use this to workout the size of the container (the viewport of the scrollable content)
 	//
 	{
-		container_size.x -= style->border_width * 2;
-		container_size.y -= style->border_width * 2;
+		container_size.x -= style->border_width * 2.f + VuiThickness_horizontal(&style->padding);
+		container_size.y -= style->border_width * 2.f + VuiThickness_vertical(&style->padding);
 
 		if (can_show_vertical_bar) {
 			show_vertical_bar = flags & VuiCtrlFlags_scrollable_vertical_always_show || content_size.y > container_size.y;
 		}
 
 		if (show_vertical_bar) {
-			container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+			container_size.x -= vertical_scroll_bar_outer_width;
 			scroll_view->flags |= _VuiCtrlFlags_show_vertical_bar;
 		} else {
 			scroll_view->flags &= ~_VuiCtrlFlags_show_vertical_bar;
@@ -2742,13 +2776,13 @@ void vui_scroll_view_end() {
 		}
 
 		if (show_horizontal_bar) {
-			container_size.y -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
+			container_size.y -= horizontal_scroll_bar_outer_height;
 			scroll_view->flags |= _VuiCtrlFlags_show_horizontal_bar;
 
 			if (can_show_vertical_bar && !show_vertical_bar) {
 				show_vertical_bar = content_size.y > container_size.y;
 				if (show_vertical_bar) {
-					container_size.x -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+					container_size.x -= vertical_scroll_bar_outer_width;
 					scroll_view->flags |= _VuiCtrlFlags_show_vertical_bar;
 				} else {
 					scroll_view->flags &= ~_VuiCtrlFlags_show_vertical_bar;
@@ -2769,13 +2803,15 @@ void vui_scroll_view_end() {
 
 	//
 	// workout the long side lengths of the scroll bars
-	float scroll_bar_length_horizontal = scroll_view_size.x - VuiThickness_horizontal(&bar_style->margin) - style->border_width * 2;
-	float scroll_bar_length_vertical = scroll_view_size.y - VuiThickness_vertical(&bar_style->margin) - style->border_width * 2;
+	float scroll_bar_length_horizontal = scroll_view_size.x - style->border_width * 2 -
+		VuiThickness_horizontal(&style->padding) - VuiThickness_horizontal(&bar_style->margin);
+	float scroll_bar_length_vertical = scroll_view_size.y - style->border_width * 2 -
+		VuiThickness_vertical(&style->padding) - VuiThickness_vertical(&bar_style->margin);
 	if (flags & VuiCtrlFlags_resizable || show_vertical_bar) {
-		scroll_bar_length_horizontal -= bar_style->width + VuiThickness_horizontal(&bar_style->margin);
+		scroll_bar_length_horizontal -= vertical_scroll_bar_outer_width;
 	}
 	if (flags & VuiCtrlFlags_resizable) {
-		scroll_bar_length_vertical -= bar_style->width + VuiThickness_vertical(&bar_style->margin);
+		scroll_bar_length_vertical -= horizontal_scroll_bar_outer_height;
 	}
 
 	//
@@ -2790,27 +2826,27 @@ void vui_scroll_view_end() {
 	vui_scope_layout_wrap_spacing(0.f) {
 		if (show_horizontal_bar) {
 			vui_scope_align(VuiAlign_left_bottom)
-				offset_changed = _vui_scroll_bar(-2, bar_style->width, scroll_bar_length_horizontal, container_size.x, &scroll_offset.x, content_size.x, vui_true, bar_style);
+				offset_changed = _vui_scroll_bar(-2, scroll_bar_length_horizontal, container_size.x, &scroll_offset.x, content_size.x, vui_true, bar_style);
 		}
 
 		if (show_vertical_bar) {
 			vui_scope_align(VuiAlign_right_top)
-			offset_changed = _vui_scroll_bar(-3, bar_style->width, scroll_bar_length_vertical, container_size.y, &scroll_offset.y, content_size.y, vui_false, bar_style);
+			offset_changed = _vui_scroll_bar(-3, scroll_bar_length_vertical, container_size.y, &scroll_offset.y, content_size.y, vui_false, bar_style);
 		}
 
 		if (flags & VuiCtrlFlags_resizable) {
-			vui_scope_width(bar_style->width)
-			vui_scope_height(bar_style->width)
+			vui_scope_width(vui_auto_len)
+			vui_scope_height(vui_auto_len)
 			vui_scope_align(VuiAlign_right_bottom)
 			vui_ctrl_start(-4, &bar_style->ctrl);
-			vui_scope_width(vui_fill_len)
-			vui_scope_height(vui_fill_len)
+			vui_scope_width(bar_style->slider_width)
+			vui_scope_height(bar_style->slider_width)
 			state = vui_button(-4, bar_style->slider_style);
 			vui_ctrl_end();
 			if (state & VuiFocusState_held) {
 				VuiVec2 min;
-				min.x = (VuiThickness_horizontal(&bar_style->margin) + bar_style->border_width + style->border_width + bar_style->width) * 2;
-				min.y = (VuiThickness_vertical(&bar_style->margin) + bar_style->border_width + style->border_width + bar_style->width) * 2;
+				min.x = vertical_scroll_bar_outer_width * 2.f;
+				min.y = horizontal_scroll_bar_outer_height * 2.f;
 
 				scroll_view_size.x += _vui.input.mouse.offset_x;
 				scroll_view_size.y += _vui.input.mouse.offset_y;
