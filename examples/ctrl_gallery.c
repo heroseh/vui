@@ -1,4 +1,6 @@
 
+#include <errno.h>
+
 #define GL_GLEXT_PROTOTYPES
 
 #include <SDL2/SDL.h>
@@ -13,79 +15,20 @@
 #include "../vui.h"
 #include "../vui.c"
 
+#include "../backends/vui_sdl2.h"
+#include "../backends/vui_sdl2.c"
+
+#include "../backends/vui_opengl.h"
+#include "../backends/vui_opengl.c"
+
+#include "../backends/vui_stbtruetype.h"
+#include "../backends/vui_stbtruetype.c"
+
+#include "../backends/vui_stbtruetype_manager.h"
+#include "../backends/vui_stbtruetype_manager.c"
+
 #define screen_width 1280
 #define screen_height 720
-
-typedef struct {
-	stbtt_fontinfo* info;
-	VuiStk(int32_t) codepts;
-	stbtt_packedchar* codepts_packed_chars;
-	uint32_t codepts_packed_chars_cap;
-	float scale;
-} ScaledFont;
-
-void ScaledFont_init(ScaledFont* font, stbtt_fontinfo* info, float pixel_height) {
-	*font = (ScaledFont){0};
-	font->info = info;
-	font->scale = stbtt_ScaleForPixelHeight(info, pixel_height);
-}
-
-void ScaledFont_clear_codepts(ScaledFont* f) {
-	VuiStk_clear(f->codepts);
-}
-
-void ScaledFont_add_codept(ScaledFont* f, int32_t codept) {
-	int32_t* codepts = f->codepts;
-	for (uint32_t i = 0; i < VuiStk_count(f->codepts); i += 1) {
-		if (codepts[i] == codept) return;
-	}
-
-	int32_t* t = VuiStk_push(&f->codepts);
-	*t = codept;
-}
-
-VuiBool ScaledFont_pack_codepts(ScaledFont* f, stbtt_pack_context* spc) {
-	if (f->codepts_packed_chars_cap != VuiStk_cap(f->codepts)) {
-		f->codepts_packed_chars = vui_mem_realloc_array(
-			stbtt_packedchar,
-			_vui.allocator,
-			f->codepts_packed_chars,
-			f->codepts_packed_chars_cap,
-			VuiStk_cap(f->codepts)
-		);
-	}
-
-	stbtt_pack_range r = {0};
-	r.font_size = 32;
-	r.chardata_for_range = f->codepts_packed_chars;
-	r.num_chars = VuiStk_count(f->codepts);
-	r.array_of_unicode_codepoints = f->codepts;
-
-	return stbtt_PackFontRanges(spc, f->info->data, 0, &r, 1) == 1;
-}
-
-uint32_t ScaledFont_get_codept_idx(ScaledFont* f, int32_t codept) {
-	int32_t* codepts = f->codepts;
-	for (uint32_t i = 0; i < VuiStk_count(f->codepts); i += 1) {
-		if (codepts[i] == codept) return i;
-	}
-
-	vui_assert(vui_false, "cannot find codept %lc in the scaled font codept cache. make sure codepoint is added with ScaledFont_add_codept", codept);
-}
-
-stbtt_fontinfo liberation_sans = {0};
-stbtt_fontinfo liberation_mono = {0};
-
-ScaledFont liberation_sans_32px = {0};
-ScaledFont liberation_mono_32px = {0};
-
-typedef struct {
-	uint8_t* pixels;
-	uint32_t width;
-	uint32_t height;
-} GlyphTexture;
-
-GlyphTexture glyph_texture = {0};
 
 const char* vertex_shader_src =
 	"#version 330 core\n"
@@ -117,27 +60,31 @@ const char* fragment_shader_src =
 	"  }\n"
 	"}";
 
-void update_glyph_texture() {
-	stbtt_pack_context pack_ctx = {0};
-	vui_assert(stbtt_PackBegin(&pack_ctx, glyph_texture.pixels, glyph_texture.width, glyph_texture.height, 0, 1, NULL), "failed to create packing context");
+typedef enum {
+	AppWindowId_main,
+	AppWindowId_COUNT,
+} AppWindowId;
 
-	vui_assert(ScaledFont_pack_codepts(&liberation_sans_32px, &pack_ctx), "failed to pack codepoints in texture");
-	vui_assert(ScaledFont_pack_codepts(&liberation_mono_32px, &pack_ctx), "failed to pack codepoints in texture");
-
-	stbtt_PackEnd(&pack_ctx);
-}
-
-typedef struct AppState AppState;
-struct AppState {
-	VuiImageId images[4];
+typedef struct App App;
+struct App {
+	SDL_Window* window;
+	VuiGlyphTextureId ascii_glyph_texture_id;
+	VuiGlyphTextureId etc_glyph_texture_id;
+	VuiFontId default_font_id;
+	VuiImageId images[5];
+	VuiStk(char) font_file_bytes;
+	struct {
+		GLuint tex_ascii_glyph_texture;
+		GLuint tex_etc_glyph_texture;
+		GLuint tex_image;
+		GLuint program;
+		float projection[16];
+	} opengl;
 };
 
-AppState app_state;
+App app;
 
 void build_ui() {
-	ScaledFont_clear_codepts(&liberation_sans_32px);
-	ScaledFont_clear_codepts(&liberation_mono_32px);
-
 	vui_frame_start(vui_false);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
@@ -161,8 +108,8 @@ void build_ui() {
 			vui_column_layout();
 
 			VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
-			vui_image_button(vui_sib_id, app_state.images[2], VuiColor_white, vui_ss.button_action);
-			vui_image_text_button(vui_sib_id, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
+			vui_image_button(vui_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
+			vui_image_text_button(vui_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
 		vui_text(vui_sib_id, "Toggle Buttons", 0.f, &vui_ss.text_header);
@@ -171,8 +118,8 @@ void build_ui() {
 			vui_column_layout();
 
 			vui_text_toggle_button(vui_sib_id, NULL, "Button 1", vui_ss.button_action);
-			vui_image_toggle_button(vui_sib_id, NULL, app_state.images[2], VuiColor_white, vui_ss.button_action);
-			vui_image_text_toggle_button(vui_sib_id, NULL, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
+			vui_image_toggle_button(vui_sib_id, NULL, app.images[3], VuiColor_white, vui_ss.button_action);
+			vui_image_text_toggle_button(vui_sib_id, NULL, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
 		vui_text(vui_sib_id, "Select Buttons", 0.f, &vui_ss.text_header);
@@ -182,8 +129,8 @@ void build_ui() {
 
 			static VuiCtrlSibId selected_sib_id = 0;
 			vui_text_select_button(vui_sib_id, &selected_sib_id, "Button 1", vui_ss.button_action);
-			vui_image_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, vui_ss.button_action);
-			vui_image_text_select_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, "Button 3", vui_ss.button_action);
+			vui_image_select_button(vui_sib_id, &selected_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
+			vui_image_text_select_button(vui_sib_id, &selected_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
 		vui_text(vui_sib_id, "Check Boxes", 0.f, &vui_ss.text_header);
@@ -192,7 +139,7 @@ void build_ui() {
 			vui_column_layout();
 
 			vui_text_check_box(vui_sib_id, NULL, "Button 1", vui_ss.check_box);
-			vui_image_check_box(vui_sib_id, NULL, app_state.images[2], VuiColor_white, vui_ss.check_box);
+			vui_image_check_box(vui_sib_id, NULL, app.images[3], VuiColor_white, vui_ss.check_box);
 		}
 
 		vui_text(vui_sib_id, "Radio Buttons", 0.f, &vui_ss.text_header);
@@ -202,7 +149,7 @@ void build_ui() {
 
 			static VuiCtrlSibId selected_sib_id = 0;
 			vui_text_radio_button(vui_sib_id, &selected_sib_id, "Button 1", vui_ss.radio_button);
-			vui_image_radio_button(vui_sib_id, &selected_sib_id, app_state.images[2], VuiColor_white, vui_ss.radio_button);
+			vui_image_radio_button(vui_sib_id, &selected_sib_id, app.images[3], VuiColor_white, vui_ss.radio_button);
 		}
 
 		vui_text(vui_sib_id, "Progress Bar", 0.f, &vui_ss.text_header);
@@ -320,184 +267,45 @@ static void mat4x4_ortho(float* out, float left, float right, float bottom, floa
     #undef T
 }
 
-typedef struct OpenGLRenderState OpenGLRenderState;
-struct OpenGLRenderState {
-	GLuint tex_glyph;
-	GLuint tex_image;
-	GLuint program;
-	GLuint vao;
-	GLuint vbo;
-	GLuint ibo;
-	float projection[16];
-};
+int file_read_all(char* path, VuiStk(char)* bytes_out) {
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) { return errno; }
 
-OpenGLRenderState render_state = {0};
+	// seek the cursor to the end
+    if (fseek(file, 0, SEEK_END) == -1) { goto ERR; }
 
-typedef enum {
-	WindowId_main,
-	WindowId_COUNT,
-} WindowId;
+	// get the location of the position we have seeked the cursor to.
+	// this will tell us the file size
+    long int file_size = ftell(file);
+    if (file_size == -1) { goto ERR; }
 
-void render_ui() {
-	static uint64_t prev_hash = 0;
-	VuiWindowRender* w = vui_window_render(WindowId_main, 1.0, vui_false);
-	/*
-	vui_window_dump_render(0, stdout);
-	exit(0);
-	*/
-	if (w->hash == prev_hash) return;
+	// seek the cursor back to the beginning
+    if (fseek(file, 0, SEEK_SET) == -1) { goto ERR; }
 
-	glBindBuffer(GL_ARRAY_BUFFER, render_state.vbo);
-	glBufferData(GL_ARRAY_BUFFER, VuiStk_count(w->verts) * sizeof(VuiVertex), w->verts, GL_DYNAMIC_DRAW);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, VuiStk_count(w->indices) * sizeof(VuiVertexIdx), w->indices, GL_DYNAMIC_DRAW);
-
-	glUniformMatrix4fv(glGetUniformLocation(render_state.program, "u_mvp"), 1, GL_FALSE, render_state.projection);
-
-	GLenum index_type = 0;
-	switch (sizeof(VuiVertexIdx)) {
-		case sizeof(uint8_t): index_type = GL_UNSIGNED_BYTE; break;
-		case sizeof(uint16_t): index_type = GL_UNSIGNED_SHORT; break;
-		case sizeof(uint32_t): index_type = GL_UNSIGNED_INT; break;
-	}
-
-	VuiRenderCmd* cmds = w->cmds;
-	for (int i = 0; i < VuiStk_count(w->cmds); i += 1) {
-		VuiRenderCmd* c = &cmds[i];
-		GLuint tex = 0;
-		switch (c->texture_id) {
-			case 0: tex = render_state.tex_glyph; break;
-			case 1: tex = render_state.tex_image; break;
+	//
+	// ensure the buffer has enough capacity
+    if (VuiStk_cap(*bytes_out) < file_size) {
+        if (!VuiStk_resize_cap(bytes_out, file_size)) {
+			return ENOMEM;
 		}
+    }
 
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, tex);
-		glDrawElements(GL_TRIANGLES, c->indices_count, index_type, (void*)((uintptr_t)c->indices_start_idx * sizeof(VuiVertexIdx)));
-	}
+	// read the file in
+    size_t read_size = fread(*bytes_out, 1, file_size, file);
+    if (read_size != file_size) { goto ERR; }
+
+    if (fclose(file) != 0) { return errno; }
+
+    _VuiStk_header(*bytes_out)->count = read_size;
+    return 0;
+
+ERR: {}
+	int err = errno;
+    fclose(file);
+    return err;
 }
 
-uint8_t* read_font_from_disk(char* path) {
-	FILE* f = fopen(path, "rb");
-	vui_assert(f, "failed to open font at %s", path);
-	fseek(f, 0, SEEK_END);
-	long size = ftell(f);
-	fseek(f, 0, SEEK_SET);
-
-	uint8_t* font_data = vui_mem_alloc_array(uint8_t, _vui.allocator, size);
-
-	fread(font_data, size, 1, f);
-	fclose(f);
-	return font_data;
-}
-
-uint32_t utf8codepoint(char* str, int32_t* out_codepoint) {
-	uint32_t bytes = 0;
-	if (0xf0 == (0xf8 & str[0])) {
-		// 4 byte utf8 codepoint
-		*out_codepoint = ((0x07 & str[0]) << 18) | ((0x3f & str[1]) << 12) |
-		((0x3f & str[2]) << 6) | (0x3f & str[3]);
-		bytes = 4;
-	} else if (0xe0 == (0xf0 & str[0])) {
-		// 3 byte utf8 codepoint
-		*out_codepoint =
-		((0x0f & str[0]) << 12) | ((0x3f & str[1]) << 6) | (0x3f & str[2]);
-		bytes = 3;
-	} else if (0xc0 == (0xe0 & str[0])) {
-		// 2 byte utf8 codepoint
-		*out_codepoint = ((0x1f & str[0]) << 6) | (0x3f & str[1]);
-		bytes = 2;
-	} else {
-		// 1 byte utf8 codepoint otherwise
-		*out_codepoint = str[0];
-		bytes = 1;
-	}
-
-	return bytes;
-}
-
-VuiVec2 position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
-	if (text_length == 0) { return VuiVec2_zero; }
-	ScaledFont* font = {0};
-	switch (font_id) {
-		case 0: font = &liberation_sans_32px; break;
-		case 1: font = &liberation_mono_32px; break;
-		default: printf("unreconginsed font_id %u\n", font_id); exit(1);
-	}
-
-
-	//
-	//
-	// TODO: remove ScaledFont and make the glyph texture support any text height.
-	// or maybe just to SDF fonts
-	//
-	//
-
-	int ascent, descent, line_gap;
-	stbtt_GetFontVMetrics(font->info, &ascent, &descent, &line_gap);
-
-	float scale = stbtt_ScaleForPixelHeight(font->info, line_height);
-	ascent = roundf(ascent * scale);
-	descent = roundf(descent * scale);
-
-	int32_t codept = 0;
-	uint32_t i = utf8codepoint(text, &codept);
-	int codept_glyph = stbtt_FindGlyphIndex(font->info, codept);
-
-	VuiVec2 pos = top_left;
-	pos.y += ascent;
-
-	VuiVec2 max_pos = {0};
-
-	while (1) {
-		if (render_glyph_fn) {
-			uint32_t codept_idx = ScaledFont_get_codept_idx(font, codept);
-			stbtt_aligned_quad quad = {0};
-			stbtt_GetPackedQuad(font->codepts_packed_chars, glyph_texture.width, glyph_texture.height,
-				codept_idx, &pos.x, &pos.y, &quad, 1);
-			VuiRect rect = VuiRect_init(quad.x0, quad.y0, quad.x1, quad.y1);
-			VuiRect uv_rect = VuiRect_init(quad.s0, quad.t0, quad.s1, quad.t1);
-			render_glyph_fn(&rect, 0, &uv_rect);
-		} else {
-			ScaledFont_add_codept(font, codept);
-
-			/* how wide is this character */
-			int advance_width;
-			int left_side_bearing;
-			stbtt_GetGlyphHMetrics(font->info, codept_glyph, &advance_width, &left_side_bearing);
-
-			/* get bounding box for character (may be offset to account for chars that dip above or below the line */
-			int c_x1, c_y1, c_x2, c_y2;
-			stbtt_GetGlyphBitmapBox(font->info, codept_glyph, scale, scale, &c_x1, &c_y1, &c_x2, &c_y2);
-			pos.x += roundf(advance_width * scale);
-		}
-
-		if (i >= text_length) break;
-
-		int32_t next_codept = 0;
-		i += utf8codepoint(&text[i], &next_codept);
-		int next_codept_glyph = stbtt_FindGlyphIndex(font->info, next_codept);
-
-		/* add kerning */
-		int kern;
-		kern = stbtt_GetGlyphKernAdvance(font->info, codept, next_codept);
-		pos.x += roundf(kern * scale);
-
-		codept = next_codept;
-		codept_glyph = next_codept_glyph;
-	}
-
-	max_pos.x = vui_max(max_pos.x, pos.x);
-	max_pos.y = pos.y - descent;
-	return max_pos;
-}
-
-void vui_text_box_focus_change(VuiBool focused) {
-	if (focused) SDL_StartTextInput();
-	else SDL_StopTextInput();
-}
-
-GLuint opengl_gen_texture() {
+GLuint opengl_texture_gen() {
 	GLuint tex;
 	glGenTextures(1, &tex);
 	return tex;
@@ -550,136 +358,33 @@ void opengl_compile_and_use_shader() {
 
 	glUseProgram(program);
 
-	render_state.program = program;
+	app.opengl.program = program;
 }
 
-void opengl_gen_vao_vbos() {
-	glGenVertexArrays(1, &render_state.vao);
-	glBindVertexArray(render_state.vao);
+void glyph_texture_pack_and_update(VuiGlyphTextureId glyph_texture_id, GLuint texture_id) {
+	vui_stbtt_glyph_texture_pack(glyph_texture_id);
 
-	glGenBuffers(1, &render_state.vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, render_state.vbo);
-
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
-	glEnableVertexAttribArray(2);
-
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, pos));
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, uv));
-	glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, color));
-
-	glGenBuffers(1, &render_state.ibo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.ibo);
+	uint32_t wh = 0;
+	uint8_t* pixels = vui_stbtt_glyph_texture_get_pixels_and_wh(glyph_texture_id, &wh);
+	opengl_texture_set_pixels(texture_id, GL_R8, GL_RED, wh, wh, pixels);
 }
 
-typedef struct InputState InputState;
-struct InputState {
-	VuiMouseButtons mouse_buttons_pressed;
-	VuiMouseButtons mouse_buttons_released;
-	VuiInputActions actions;
-	float mouse_wheel_x;
-	float mouse_wheel_y;
-	uint8_t enter_is_pressed: 1;
-	uint8_t space_is_pressed: 1;
-};
-
-void sdl2_handle_event(SDL_Event* e, InputState* s) {
-	switch (e->type) {
-		case SDL_MOUSEBUTTONDOWN:
-			switch (e->button.button) {
-				case SDL_BUTTON_LEFT: s->mouse_buttons_pressed |= VuiMouseButtons_left; break;
-				case SDL_BUTTON_MIDDLE: s->mouse_buttons_pressed |= VuiMouseButtons_middle; break;
-				case SDL_BUTTON_RIGHT: s->mouse_buttons_pressed |= VuiMouseButtons_right; break;
-			}
-			break;
-		case SDL_MOUSEBUTTONUP:
-			switch (e->button.button) {
-				case SDL_BUTTON_LEFT: s->mouse_buttons_released |= VuiMouseButtons_left; break;
-				case SDL_BUTTON_MIDDLE: s->mouse_buttons_released |= VuiMouseButtons_middle; break;
-				case SDL_BUTTON_RIGHT: s->mouse_buttons_released |= VuiMouseButtons_right; break;
-			}
-			break;
-		case SDL_MOUSEWHEEL:
-			if (SDL_GetModState() & KMOD_SHIFT) {
-				s->mouse_wheel_x += e->wheel.y * 20.0;
-				s->mouse_wheel_y += e->wheel.x * 20.0;
-			} else {
-				s->mouse_wheel_x += e->wheel.x * 20.0;
-				s->mouse_wheel_y += e->wheel.y * 20.0;
-			}
-			break;
-		case SDL_KEYUP:
-			switch (e->key.keysym.sym) {
-				case SDLK_RETURN: s->actions |= VuiInputActions_focus_released; s->space_is_pressed = 0; break;
-				case SDLK_SPACE: s->actions |= VuiInputActions_focus_released; s->enter_is_pressed = 0; break;
-			}
-			break;
-		case SDL_KEYDOWN:
-			switch (e->key.keysym.sym) {
-				case SDLK_LEFT: s->actions |= VuiInputActions_left; break;
-				case SDLK_RIGHT: s->actions |= VuiInputActions_right; break;
-				case SDLK_UP: s->actions |= VuiInputActions_up; break;
-				case SDLK_DOWN: s->actions |= VuiInputActions_down; break;
-				case SDLK_BACKSPACE: s->actions |= VuiInputActions_backspace; break;
-				case SDLK_DELETE: s->actions |= VuiInputActions_delete; break;
-				case SDLK_HOME: s->actions |= VuiInputActions_home; break;
-				case SDLK_END: s->actions |= VuiInputActions_end; break;
-				case SDLK_TAB: s->actions |= VuiInputActions_focus_next; break;
-				case SDLK_RETURN: s->actions |= VuiInputActions_focus_pressed; s->space_is_pressed = 1; break;
-				case SDLK_SPACE: s->actions |= VuiInputActions_focus_pressed; s->enter_is_pressed = 1; break;
-			}
-			break;
-		case SDL_WINDOWEVENT:
-			switch (e->window.event) {
-				case SDL_WINDOWEVENT_RESIZED:
-					mat4x4_ortho(render_state.projection, 0, e->window.data1, e->window.data2, 0, -1, 1);
-					glViewport(0, 0, e->window.data1, e->window.data2);
-					break;
-				case SDL_WINDOWEVENT_CLOSE:
-					exit(0);
-					break;
-				default:
-					break;
-			}
-			break;
-		case SDL_TEXTINPUT:
-			vui_input_add_text(e->text.text, strlen(e->text.text));
-			break;
+//
+// implement the function that is required by the vui_stbtruetype_manager shim.
+// here we decide which styled glyphs go in which glyph texture.
+// in our case all ASCII glyphs using the default font sizes of VUI (header and menu) to in one.
+// and the rest go in another.
+VuiGlyphTextureId vui_stbtt_get_styled_glyph_texture_id(VuiFontId font_id, float line_height, int32_t codept) {
+	if (codept >= 33 && codept <= 126) {
+		return app.ascii_glyph_texture_id;
+	} else {
+		return app.etc_glyph_texture_id;
 	}
 }
 
-void update_input(InputState* s) {
-	int mouse_x, mouse_y;
-	SDL_GetMouseState(&mouse_x, &mouse_y);
-
-	vui_input_set_mouse_pos(mouse_x, mouse_y);
-	vui_input_set_mouse_wheel_offset(s->mouse_wheel_x, s->mouse_wheel_y);
-
+void App_init() {
 	//
-	// TODO handle in the event system when we have multiple windows
-	vui_window_set_mouse_focused(0);
-	vui_window_set_focused(0);
-
-	vui_input_set_mouse_button_pressed(s->mouse_buttons_pressed);
-	vui_input_set_mouse_button_released(s->mouse_buttons_released);
-
-	SDL_Keymod key_mod = SDL_GetModState();
-
-	if (key_mod & KMOD_SHIFT) s->actions |= VuiInputActions_shift_pressed;
-	if (key_mod & KMOD_CTRL) s->actions |= VuiInputActions_ctrl_pressed;
-	if (s->enter_is_pressed || s->space_is_pressed) s->actions |= VuiInputActions_focus_held;
-	vui_input_add_actions(s->actions);
-
-	//
-	// reset the input state for the next frame
-	s->mouse_buttons_pressed = 0;
-	s->mouse_buttons_released = 0;
-	s->mouse_wheel_x = 0;
-	s->mouse_wheel_y = 0;
-	s->actions = 0;
-}
-
-int main(int argc, char** argv) {
+	// initialize SDL with OpenGL 3.3 Core Profile
 	SDL_Init(SDL_INIT_VIDEO);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
@@ -687,78 +392,127 @@ int main(int argc, char** argv) {
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
-	SDL_Window* window = SDL_CreateWindow("Vui Example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
-	SDL_GLContext context = SDL_GL_CreateContext(window);
+	//
+	// create a Window with an OpenGL context
+	app.window = SDL_CreateWindow("Vui Example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+	SDL_GLContext context = SDL_GL_CreateContext(app.window);
 	SDL_GL_SetSwapInterval(1);
 
+	//
+	// initialize the VUI OpenGL shim
+	vui_opengl_init();
 	opengl_compile_and_use_shader();
-	opengl_gen_vao_vbos();
 
-	render_state.tex_glyph = opengl_gen_texture();
-	render_state.tex_image = opengl_gen_texture();
+	//
+	// create the opengl textures, these will be uninitialized until opengl_texture_set_pixels is called.
+	//
+	app.opengl.tex_ascii_glyph_texture = opengl_texture_gen();
+	app.opengl.tex_etc_glyph_texture = opengl_texture_gen();
+	app.opengl.tex_image = opengl_texture_gen();
 
+	//
+	// load in the font from a file and create the font and glyph textures using the font manager.
+	// we have a glyph texture that only contains ASCII characters and is precomputed on app initialization.
+	// the other glyph texture is used for all the other misc characters and line heights.
+	//
+	int e = file_read_all("fonts/LiberationMono-Regular.ttf", &app.font_file_bytes);
+	vui_assert(e == 0, "error reading file: %s", strerror(e));
+	app.default_font_id = vui_stbtt_font_add((const uint8_t*)app.font_file_bytes);
+	app.ascii_glyph_texture_id = vui_stbtt_glyph_texture_add(app.opengl.tex_ascii_glyph_texture, 0, 0, 0, 0);
+	app.etc_glyph_texture_id = vui_stbtt_glyph_texture_add(app.opengl.tex_etc_glyph_texture, 0, 0, 0, 0);
+
+	//
+	// initialize VUI.
+	// we pass in the position text function from the vui stb truetype shim.
+	//
 	VuiSetup setup = {
-		.position_text_fn = position_text,
+		.position_text_fn = vui_stbtt_position_text,
 		.position_text_userdata = NULL,
-		.text_box_focus_change_fn = vui_text_box_focus_change,
 		.windows_count = 1,
+		.allocator = NULL,
+		.default_font_id = app.default_font_id,
 	};
 	vui_assert(vui_init(&setup), "failed to initialize vui");
 
+	//
+	// precompute the glyph texture for all the visible ascii characters for the two font sizes VUI uses by default.
+	//
+	{
+		stbtt_fontinfo* info = vui_stbtt_font_get(app.default_font_id);
+
+		for (int32_t codept = 33; codept < 127; codept += 1) {
+			//
+			// add the glyph for the header size
+			vui_stbtt_glyph_texture_add_styled_glyph(
+				app.ascii_glyph_texture_id, app.default_font_id, vui_line_height_header, stbtt_FindGlyphIndex(info, codept));
+
+			//
+			// add the glyph for the menu size
+			vui_stbtt_glyph_texture_add_styled_glyph(
+				app.ascii_glyph_texture_id, app.default_font_id, vui_line_height_menu, stbtt_FindGlyphIndex(info, codept));
+		}
+
+		glyph_texture_pack_and_update(app.ascii_glyph_texture_id, app.opengl.tex_ascii_glyph_texture);
+	}
+
+	//
+	// setup the images that are use in VUI.
+	// this can be done at anytime if images are dynamically loaded.
+	//
 	{
 		VuiImage image;
 
+		uint32_t wh = 0;
+		vui_stbtt_glyph_texture_get_pixels_and_wh(app.ascii_glyph_texture_id, &wh);
+
 		//
-		// glyph texture
-		image.width = 1024,
-		image.height = 1024,
-		image.texture_id = 0,
+		// ascii glyph texture
+		image.width = wh,
+		image.height = wh,
+		image.texture_id = app.opengl.tex_ascii_glyph_texture,
 		image.uv_rect = VuiRect_init(0.f, 0.f, 1.f, 1.f),
-		app_state.images[0] = vui_image_add(&image);
+		app.images[0] = vui_image_add(&image);
+
+		//
+		// etc glyph texture
+		// initialize the size to zero as we will update this every frame.
+		image.width = 0,
+		image.height = 0,
+		image.texture_id = app.opengl.tex_etc_glyph_texture,
+		image.uv_rect = VuiRect_init(0.f, 0.f, 1.f, 1.f),
+		app.images[1] = vui_image_add(&image);
 
 		//
 		// color texture
 		image.width = 256,
 		image.height = 256,
-		image.texture_id = 1,
+		image.texture_id = app.opengl.tex_image,
 		image.uv_rect = VuiRect_init(0.f, 0.f, 1.f, 1.f),
-		app_state.images[1] = vui_image_add(&image);
+		app.images[2] = vui_image_add(&image);
 
 		//
 		// color texture subsection small icon
-		image.width = 32,
-		image.height = 32,
-		image.texture_id = 1,
+		image.width = 24,
+		image.height = 24,
+		image.texture_id = app.opengl.tex_image,
 		image.uv_rect = VuiRect_init(0.5f, 0.5f, 0.7f, 0.7f),
-		app_state.images[2] = vui_image_add(&image);
+		app.images[3] = vui_image_add(&image);
 
 		//
 		// color texture subsection rectangle
 		image.width = 256,
 		image.height = 128,
-		image.texture_id = 1,
+		image.texture_id = app.opengl.tex_image,
 		image.uv_rect = VuiRect_init(0.0f, 0.0f, 1.f, 0.5f),
-		app_state.images[3] = vui_image_add(&image);
+		app.images[4] = vui_image_add(&image);
 	}
 
-	uint8_t* liberation_sans_font_data = read_font_from_disk("fonts/LiberationSans-Regular.ttf");
-	vui_assert(stbtt_InitFont(&liberation_sans, liberation_sans_font_data, 0), "failed to initialize liberation_sans with stbtt");
-
-	uint8_t* liberation_mono_font_data = read_font_from_disk("fonts/LiberationMono-Regular.ttf");
-	vui_assert(stbtt_InitFont(&liberation_mono, liberation_mono_font_data, 0), "failed to initialize liberation_mono with stbtt");
-
-	ScaledFont_init(&liberation_sans_32px, &liberation_sans, 32);
-	ScaledFont_init(&liberation_mono_32px, &liberation_mono, 32);
-
-	glyph_texture.pixels = malloc(1024 * 1024);
-	glyph_texture.width = 1024;
-	glyph_texture.height = 1024;
-
+	//
+	// build the color texture we use as an image.
 	{
 		// r, g, b
 		char* color_plane_pixels = malloc(256 * 256 * 3);
@@ -773,30 +527,75 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		opengl_texture_set_pixels(render_state.tex_image, GL_RGBA, GL_RGB, 256, 256, color_plane_pixels);
+		opengl_texture_set_pixels(app.opengl.tex_image, GL_RGBA, GL_RGB, 256, 256, color_plane_pixels);
 	}
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
 
-	InputState input_state = {0};
+void App_update() {
+	//
+	// remove all the glyphs from the glyph texture that holds all the different sized or non ASCII glyphs.
+	vui_stbtt_glyph_texture_clear_styled_glyphs(app.etc_glyph_texture_id);
+
+	//
+	// transfer all the information that VUI needs from SDL.
+	vui_sdl2_frame_start();
+
+	build_ui();
+
+	//
+	// pack the etc glyph texture and send the pixels to the GPU.
+	glyph_texture_pack_and_update(app.etc_glyph_texture_id, app.opengl.tex_etc_glyph_texture);
+}
+
+void vui_opengl_setup_state() {
+	glUseProgram(app.opengl.program);
+	glUniformMatrix4fv(glGetUniformLocation(app.opengl.program, "u_mvp"), 1, GL_FALSE, app.opengl.projection);
+
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
+
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, pos));
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, uv));
+	glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VuiVertex), (const void*)offsetof(VuiVertex, color));
+}
+
+void App_render() {
+	VuiWindowRender* window = vui_window_render(AppWindowId_main, 1.f, vui_false);
+	vui_opengl_render(window);
+}
+
+int main(int argc, char** argv) {
+	App_init();
+
 	while (1) {
-		glClearColor(0.1,0.1,0.1,0.0);
+		glClearColor(0.1, 0.1, 0.1, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
-			sdl2_handle_event(&event, &input_state);
+			vui_sdl2_process_event(&event);
+
+			switch (event.type) {
+				case SDL_WINDOWEVENT: {
+					switch (event.window.event) {
+						case SDL_WINDOWEVENT_RESIZED:
+							mat4x4_ortho(app.opengl.projection, 0.f, event.window.data1, event.window.data2, 0.f, 1.f, 0.f);
+							break;
+					}
+					break;
+				};
+				case SDL_QUIT:
+					exit(0);
+			}
 		}
 
-		update_input(&input_state);
-
-		build_ui();
-		update_glyph_texture();
-		opengl_texture_set_pixels(render_state.tex_glyph, GL_RGBA, GL_RED, glyph_texture.width, glyph_texture.height, glyph_texture.pixels);
-
-		render_ui();
-		SDL_GL_SwapWindow(window);
+		App_update();
+		App_render();
+		SDL_GL_SwapWindow(app.window);
 	}
 
 	return 0;

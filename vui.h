@@ -132,7 +132,7 @@ struct _VuiStkHeader {
 
 //
 // these are the functions that the macro versions call, refer to the comments of the macro.
-void* _VuiStk_resize_cap(void* stk, uint32_t new_cap, uint32_t elmt_size);
+VuiBool _VuiStk_resize_cap(void** stk_ptr, uint32_t new_cap, uint32_t elmt_size);
 void* _VuiStk_push_many(void** stk_ptr, uint32_t elmts_count, uint32_t elmt_size);
 void* _VuiStk_insert_many(void** stk_ptr, uint32_t idx, uint32_t elmts_count, uint32_t elmt_size);
 void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx, uint32_t elmt_size);
@@ -169,12 +169,12 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 //
 // @param new_cap: the number of elements you want to be able to hold in the stack before you need to reallocate again
 //
-// @return: on allocation failure NULL is returned, otherwise returns the newly allocated stack of type VuiStk(T)
+// @return: on allocation failure vui_false is returned, otherwise returns vui_true
 //
 // @example:
-// stk = VuiStk_resize_cap(stk, 24);
+// VuiStk_resize_cap(&stk, 24);
 //
-#define VuiStk_resize_cap(stk, new_cap) (_vui_typeof(stk))_VuiStk_resize_cap(stk, new_cap, sizeof(*(stk)))
+#define VuiStk_resize_cap(stk_ptr, new_cap) _VuiStk_resize_cap((void**)stk_ptr, new_cap, sizeof(**(stk_ptr)))
 
 // pushes an uninitialized element on the stack and returns a pointer to it.
 // NULL is returned on allocation failure.
@@ -199,6 +199,12 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 #define VuiStk_insert_many(stk_ptr, idx, elmts_count) (_vui_typeof(*(stk_ptr)))_VuiStk_insert_many((void**)stk_ptr, idx, elmts_count, sizeof(**(stk_ptr)))
 
 //
+// remove an element at @param(idx) by shifting the ones to it's right to the left.
+// this retains the order of elements but comes at a cost of copying all the elements to it's right.
+//
+#define VuiStk_remove_shift(stk, idx) VuiStk_remove_range_shift(stk, idx, (idx) + 1)
+
+//
 // removes a range of elements by shifting the ones to it's right to the left.
 // this retains the order of elements but comes at a cost of copying all the elements to it's right.
 //
@@ -212,7 +218,7 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 // @example:
 // VuiStk_remove_range_shift(stk, 12, 18);
 //
-#define VuiStk_remove_range_shift(stk, start_idx, end_idx) _VuiStk_remove_range_shift(stk, start_idx, end_idx)
+#define VuiStk_remove_range_shift(stk, start_idx, end_idx) _VuiStk_remove_range_shift(stk, start_idx, end_idx, sizeof(*(stk)))
 
 //
 // deallocates the stack and returns NULL.
@@ -220,7 +226,7 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 // @example:
 // stk = VuiStk_deinit(stk);
 //
-#define VuiStk_deinit(stk) ((stk) ? vui_mem_dealloc(_VuiStk_header(stk), VuiStk_size(stk) + sizeof(_VuiStkHeader), alignof(void*)), NULL : NULL)
+#define VuiStk_deinit(stk) ((stk) ? vui_mem_dealloc(_vui.allocator, _VuiStk_header(stk), VuiStk_size(stk) + sizeof(_VuiStkHeader), alignof(void*)), NULL : NULL)
 
 // ===========================================================================================
 //
@@ -440,7 +446,7 @@ void vui_input_set_mouse_wheel_offset(float wheel_offset_x, float wheel_offset_y
 void vui_input_set_mouse_button_pressed(VuiMouseButtons buttons);
 void vui_input_set_mouse_button_released(VuiMouseButtons buttons);
 void vui_input_add_actions(VuiInputActions actions);
-void vui_input_add_text(char* string, uint32_t string_length);
+void vui_input_add_text(const char* string, uint32_t string_length);
 
 VuiBool vui_input_is_mouse_over_ctrl();
 VuiBool vui_input_is_mouse_scroll_focused_ctrl();
@@ -824,7 +830,7 @@ extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to,
 #define vui_border_width_default 2.f
 #define vui_radius_default 4.f
 #define vui_line_height_header 32.f
-#define vui_line_height_menu 32.f
+#define vui_line_height_menu 24.f
 #define vui_scroll_bar_width_default 18.f
 #define vui_separator_size_default 4.f
 #define vui_check_size_default 20.f
@@ -894,11 +900,45 @@ extern VuiStyleSheet vui_ss;
 #define VuiTextureId uint32_t
 #endif
 
+#ifndef VuiVertexT
+
 typedef struct {
 	VuiVec2 pos;
 	VuiVec2 uv;
 	VuiColor color;
-} VuiVertex;
+} VuiVertexT;
+
+#define VuiVertex_init(pos_, uv_, color_) (VuiVertexT) { .pos = pos_, .uv = uv_, .color = color_ }
+#define VuiVertex_scale_pos(vertex, scale_factor) (vertex).pos.x *= scale_factor; (vertex).pos.y *= scale_factor;
+#define VuiVertex_debug_fprintf(vertex, file) \
+	fprintf(file, \
+			"\t%u: { pos: [%f, %f], uv: [%f, %f], color: #%.2x%.2x%.2x%.2x }\n", \
+			vert_idx, \
+			vert->pos.x, \
+			vert->pos.y, \
+			vert->uv.x, \
+			vert->uv.y, \
+			vert->color.r, \
+			vert->color.g, \
+			vert->color.b, \
+			vert->color.a);
+
+#else // VuiVertexT
+
+#ifndef VuiVertex_init
+#error "VuiVertex_init must be defined when defining a custom VuiVertexT"
+#endif // VuiVertex_init
+
+#ifndef VuiVertex_scale_pos
+#error "VuiVertex_scale_pos must be defined when defining a custom VuiVertexT"
+#endif // VuiVertex_scale_pos
+
+#ifndef VuiVertex_debug_fprintf
+#error "VuiVertex_debug_fprintf must be defined when defining a custom VuiVertexT"
+#endif // VuiVertex_debug_fprintf
+
+#endif
+typedef VuiVertexT VuiVertex;
 
 typedef struct {
 	VuiTextureId texture_id;
@@ -1257,15 +1297,15 @@ extern void vui_image_remove(VuiImageId image_id);
 typedef uint16_t VuiViewportId;
 
 typedef void (*VuiRenderGlyphFn)(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect);
-typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
+typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
 typedef void (*VuiTextBoxFocusChange)(VuiBool focused);
 
 typedef struct {
 	VuiPositionTextFn position_text_fn;
 	void* position_text_userdata;
-	VuiTextBoxFocusChange text_box_focus_change_fn;
 	uint16_t windows_count;
 	void* allocator;
+	VuiFontId default_font_id;
 } VuiSetup;
 
 extern VuiBool vui_init(VuiSetup* setup);

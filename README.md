@@ -12,7 +12,7 @@ Inspired by (in no particular order):
 
 # Features
 - No dependencies (expect libc)
-	- Needs a text layout function that is provided in the examples
+	- But requires hooking up to sub systems of your application. See the **backends** directory.
 - Basic Controls (Buttons, Check Box, Radio Button, Progress Bar, Text Box, Input Box, Scroll View)
 - Advance Layout System
 	- Controls can be offset and aligned to the center, each edge or each corner
@@ -49,9 +49,7 @@ In a single compilation unit, include the source file.
 
 # Documentation
 
-All of the Control API is documented in the **vui.h** file. The rest of the API needs documentation but you can see the **examples/ctrl_gallery.c**
-for a working example of the VUI using stb_truetype, SDL2 and OpenGL. At the moment this has only been setup to work on Linux. However, more work in
-the near future will be made to make the examples more clear. We will probably do what Dear IMGUI does and separate the Platform and VUI example code into their own files.
+All of the Control API is documented in the **vui.h** file. The rest of the API needs documentation but you can see the **examples/ctrl_gallery.c** for a working example of the VUI using stb_truetype, SDL2 and OpenGL. At the moment this has only been setup to work on Linux. However, it shouldn't be too hard to see how the example works and reflect that in your project especially if you use SDL2, OpenGL and stb_truetype.
 
 # Screenshots
 

@@ -33,191 +33,6 @@ typedef struct { \
 	uint32_t free_list_head_id; \
 } VuiPool_##T;
 
-static inline void _VuiPool_assert_idx(_VuiPool* pool, uint32_t idx) {
-	vui_debug_assert(idx < pool->cap, "idx is out of the memory boundary of the pool. idx is '%u' but cap is '%u'", idx, pool->cap);
-}
-
-static inline VuiBool _VuiPool_is_allocated(_VuiPool* pool, uint32_t idx) {
-	_VuiPool_assert_idx(pool, idx);
-	uint8_t bit = 1 << (idx % 8);
-	return (((uint8_t*)pool->data)[idx / 8] & bit) == bit;
-}
-
-static inline void _VuiPool_set_allocated(_VuiPool* pool, uint32_t idx) {
-	_VuiPool_assert_idx(pool, idx);
-	uint8_t bit = 1 << (idx % 8);
-	((uint8_t*)pool->data)[idx / 8] |= bit;
-}
-
-static inline void _VuiPool_set_free(_VuiPool* pool, uint32_t idx) {
-	_VuiPool_assert_idx(pool, idx);
-	((uint8_t*)pool->data)[idx / 8] &= ~(1 << (idx % 8));
-}
-
-void _VuiPool_reset(_VuiPool* pool, uintptr_t elmt_size) {
-	//
-	// set all the bits to 0 so all elements are marked as free
-	uint8_t* is_alloced_bitset = pool->data;
-	memset(is_alloced_bitset, 0, pool->elmts_start_byte_idx);
-
-	//
-	// now go through and set up the link list, so every element points to the next.
-	void* elmts = vui_ptr_add(pool->data, pool->elmts_start_byte_idx);
-	uintptr_t cap = pool->cap;
-	for (uintptr_t i = 0; i < cap; i += 1) {
-		// + 2 instead of 1 because we use id's here and not indexes.
-		*(uintptr_t*)vui_ptr_add(elmts, i * elmt_size) = i + 2;
-	}
-	pool->count = 0;
-	pool->free_list_head_id = 1;
-}
-
-void _VuiPool_resize_cap(_VuiPool* pool, uint32_t new_cap, uintptr_t elmt_size, uintptr_t elmt_align) {
-	//
-	// resizing the pool is fine since we store id's everywhere.
-	//
-	uintptr_t bitset_size = pool->elmts_start_byte_idx;
-	uintptr_t new_bitset_size = (new_cap / 8) + 1 + elmt_align - 1;
-	uintptr_t new_cap_bytes = ((uintptr_t)new_cap * elmt_size) + new_bitset_size;
-
-	void* data = pool->data;
-	void* new_data = vui_mem_alloc(_vui.allocator, new_cap_bytes, alignof(uint8_t));
-
-	//
-	// zero the new bits of the is_allocated_bitset.
-	memset(vui_ptr_add(new_data, bitset_size), 0, new_bitset_size - bitset_size);
-
-	// then zero all the new elements.
-	memset(vui_ptr_add(new_data, new_bitset_size + (uintptr_t)pool->cap * elmt_size), 0, ((uintptr_t)(new_cap - pool->cap) * elmt_size));
-
-	if (data) {
-		uintptr_t cap_bytes = ((uintptr_t)pool->cap * elmt_size) + bitset_size;
-
-		//
-		// copy the bitset over to the new buffer
-		memcpy(new_data, data, bitset_size);
-
-		//
-		// copy the elements to their new location.
-		void* elmts = vui_ptr_add(data, pool->elmts_start_byte_idx);
-		void* new_elmts = vui_ptr_add(new_data, new_bitset_size);
-		memcpy(new_elmts, elmts, (uintptr_t)pool->cap * elmt_size);
-
-		//
-		// deallocate the old buffer.
-		vui_mem_dealloc(_vui.allocator, data, cap_bytes, alignof(uint8_t));
-	}
-
-	//
-	// setup the free list, by visiting each element and store an
-	// index to the next element.
-	for (uint32_t i = pool->cap; i < new_cap; i += 1) {
-		*(uint32_t*)vui_ptr_add(vui_ptr_add(new_data, new_bitset_size), i * elmt_size) = i + 2;
-	}
-
-	pool->data = new_data;
-	pool->free_list_head_id = pool->cap + 1;
-	pool->cap = new_cap;
-	pool->elmts_start_byte_idx = new_bitset_size;
-}
-
-void _VuiPool_reset_and_populate(_VuiPool* pool, void* elmts, uint32_t count, uintptr_t elmt_size, uintptr_t elmt_align) {
-	_VuiPool_reset(pool, elmt_size);
-	if (pool->cap < count) {
-		_VuiPool_resize_cap(pool, vui_max(pool->cap ? pool->cap * 2 : 64, count), elmt_size, elmt_align);
-	}
-
-	//
-	// set the elements to allocated.
-	// the last byte is set manually as only some of the bits will be on.
-	memset(pool->data, 0xff, count / 8);
-	uint32_t remaining_count = count % 8;
-	if (remaining_count) ((uint8_t*)pool->data)[count / 8] = (1 << remaining_count) - 1;
-
-	//
-	// copy the elements and set the values in the pool structure
-	memcpy(vui_ptr_add(pool->data, pool->elmts_start_byte_idx), elmts, (uintptr_t)count * elmt_size);
-	pool->count = count;
-	pool->free_list_head_id = count + 1;
-}
-
-void _VuiPool_init(_VuiPool* pool, uint32_t cap, uintptr_t elmt_size, uintptr_t elmt_align) {
-	uintptr_t bitset_size = (cap / 8) + 1;
-	uintptr_t elmts_start_byte_idx = (uintptr_t)vui_ptr_round_up_align((void*)bitset_size, elmt_align);
-	uintptr_t cap_bytes = ((uintptr_t)cap * elmt_size) + elmts_start_byte_idx;
-	pool->data = vui_mem_alloc(_vui.allocator, cap_bytes, elmt_align);
-	memset(vui_ptr_add(pool->data, elmts_start_byte_idx), 0, (uintptr_t)cap * elmt_size);
-
-	pool->elmts_start_byte_idx = elmts_start_byte_idx;
-	pool->cap = cap;
-	_VuiPool_reset(pool, elmt_size);
-	pool->free_list_head_id = 1;
-}
-
-void _VuiPool_deinit(_VuiPool* pool, uintptr_t elmt_size, uintptr_t elmt_align) {
-	uintptr_t bitset_size = (pool->cap / 8) + 1;
-	uintptr_t elmts_start_byte_idx = (uintptr_t)vui_ptr_round_up_align((void*)bitset_size, elmt_align);
-	uintptr_t cap = ((uintptr_t)pool->cap * elmt_size) + elmts_start_byte_idx;
-	vui_mem_dealloc(_vui.allocator, pool->data, cap, elmt_align);
-	*pool = (_VuiPool){0};
-}
-
-void* _VuiPool_alloc(_VuiPool* pool, VuiPoolId* id_out, uintptr_t elmt_size, uintptr_t elmt_align) {
-	if (pool->count == pool->cap) {
-		_VuiPool_resize_cap(pool, pool->cap ? pool->cap * 2 : 64, elmt_size, elmt_align);
-	}
-
-	//
-	// allocate an element and remove it from the free list
-	uintptr_t alloced_id = pool->free_list_head_id;
-	vui_debug_assert(!_VuiPool_is_allocated(pool, alloced_id - 1), "allocated element is in the free list of the pool");
-	_VuiPool_set_allocated(pool, alloced_id - 1);
-	uint32_t* alloced_elmt = (uint32_t*)vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((alloced_id - 1) * elmt_size));
-	pool->free_list_head_id = *alloced_elmt;
-
-	pool->count += 1;
-	*id_out = alloced_id;
-	return alloced_elmt;
-}
-
-void _VuiPool_assert_id(_VuiPool* pool, uint32_t elmt_id) {
-	vui_debug_assert(elmt_id, "elmt_id is null, cannot deallocate a null element");
-	vui_debug_assert(elmt_id <= pool->cap, "elmt_id is out of the memory boundary of the pool. idx is '%u' but cap is '%u'",
-		elmt_id - 1, pool->cap);
-	vui_debug_assert(_VuiPool_is_allocated(pool, elmt_id - 1), "cannot get pointer to a element that is not allocated");
-}
-
-void _VuiPool_dealloc(_VuiPool* pool, uint32_t elmt_id, uintptr_t elmt_size, uintptr_t elmt_align) {
-	_VuiPool_assert_id(pool, elmt_id);
-
-	uint32_t* elmt_next_free_id = &pool->free_list_head_id;
-	void* elmts = vui_ptr_add(pool->data, pool->elmts_start_byte_idx);
-	//
-	// the free list is stored in low to high order, to try to keep allocations near eachother.
-	// move up the free list until elmt_id is less than that node.
-	while (1) {
-		uint32_t nfi = *elmt_next_free_id;
-		if (nfi > elmt_id || nfi == pool->cap) break;
-		elmt_next_free_id = (uint32_t*)vui_ptr_add(elmts, ((uintptr_t)nfi - 1) * elmt_size);
-	}
-
-	_VuiPool_set_free(pool, elmt_id - 1);
-	// point to the next element in the list
-	*(uint32_t*)vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((uintptr_t)(elmt_id - 1) * elmt_size)) = *elmt_next_free_id;
-	// get the previous element to point to this newly deallocated block
-	*elmt_next_free_id = elmt_id;
-	pool->count -= 1;
-}
-
-void* _VuiPool_id_to_ptr(_VuiPool* pool, VuiPoolId elmt_id, uintptr_t elmt_size) {
-	_VuiPool_assert_id(pool, elmt_id);
-	return vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((uintptr_t)(elmt_id - 1) * elmt_size));
-}
-
-VuiPoolId _VuiPool_ptr_to_id(_VuiPool* pool, void* ptr, uintptr_t elmt_size) {
-	return (vui_ptr_diff(ptr, vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx)) / elmt_size) + 1;
-}
-
 // ===========================================================================================
 //
 //
@@ -351,7 +166,6 @@ typedef_VuiPool(_VuiCtrl);
 typedef struct {
 	VuiPositionTextFn position_text_fn;
 	void* position_text_userdata;
-	VuiTextBoxFocusChange text_box_focus_change_fn;
 	void* allocator;
 
 	_VuiWindow* windows;
@@ -530,6 +344,210 @@ void _vui_pop_ctrl_attr(VuiCtrlAttr attr) {
 // ===========================================================================================
 //
 //
+// memory allocation - element pool implementation
+//
+//
+// ===========================================================================================
+
+static inline void _VuiPool_assert_idx(_VuiPool* pool, uint32_t idx) {
+	vui_debug_assert(idx < pool->cap, "idx is out of the memory boundary of the pool. idx is '%u' but cap is '%u'", idx, pool->cap);
+}
+
+static inline VuiBool _VuiPool_is_allocated(_VuiPool* pool, uint32_t idx) {
+	_VuiPool_assert_idx(pool, idx);
+	uint8_t bit = 1 << (idx % 8);
+	return (((uint8_t*)pool->data)[idx / 8] & bit) == bit;
+}
+
+static inline void _VuiPool_set_allocated(_VuiPool* pool, uint32_t idx) {
+	_VuiPool_assert_idx(pool, idx);
+	uint8_t bit = 1 << (idx % 8);
+	((uint8_t*)pool->data)[idx / 8] |= bit;
+}
+
+static inline void _VuiPool_set_free(_VuiPool* pool, uint32_t idx) {
+	_VuiPool_assert_idx(pool, idx);
+	((uint8_t*)pool->data)[idx / 8] &= ~(1 << (idx % 8));
+}
+
+void _VuiPool_reset(_VuiPool* pool, uintptr_t elmt_size) {
+	//
+	// set all the bits to 0 so all elements are marked as free
+	uint8_t* is_alloced_bitset = pool->data;
+	memset(is_alloced_bitset, 0, pool->elmts_start_byte_idx);
+
+	//
+	// now go through and set up the link list, so every element points to the next.
+	void* elmts = vui_ptr_add(pool->data, pool->elmts_start_byte_idx);
+	uintptr_t cap = pool->cap;
+	for (uintptr_t i = 0; i < cap; i += 1) {
+		// + 2 instead of 1 because we use id's here and not indexes.
+		*(uintptr_t*)vui_ptr_add(elmts, i * elmt_size) = i + 2;
+	}
+	pool->count = 0;
+	pool->free_list_head_id = 1;
+}
+
+VuiBool _VuiPool_resize_cap(_VuiPool* pool, uint32_t new_cap, uintptr_t elmt_size, uintptr_t elmt_align) {
+	//
+	// resizing the pool is fine since we store id's everywhere.
+	//
+	uintptr_t bitset_size = pool->elmts_start_byte_idx;
+	uintptr_t new_bitset_size = (new_cap / 8) + 1 + elmt_align - 1;
+	uintptr_t new_cap_bytes = ((uintptr_t)new_cap * elmt_size) + new_bitset_size;
+
+	void* data = pool->data;
+	void* new_data = vui_mem_alloc(_vui.allocator, new_cap_bytes, alignof(uint8_t));
+	if (new_data == NULL) {
+		_vui.flags |= _VuiFlags_out_of_memory;
+		return vui_false;
+	}
+
+	//
+	// zero the new bits of the is_allocated_bitset.
+	memset(vui_ptr_add(new_data, bitset_size), 0, new_bitset_size - bitset_size);
+
+	// then zero all the new elements.
+	memset(vui_ptr_add(new_data, new_bitset_size + (uintptr_t)pool->cap * elmt_size), 0, ((uintptr_t)(new_cap - pool->cap) * elmt_size));
+
+	if (data) {
+		uintptr_t cap_bytes = ((uintptr_t)pool->cap * elmt_size) + bitset_size;
+
+		//
+		// copy the bitset over to the new buffer
+		memcpy(new_data, data, bitset_size);
+
+		//
+		// copy the elements to their new location.
+		void* elmts = vui_ptr_add(data, pool->elmts_start_byte_idx);
+		void* new_elmts = vui_ptr_add(new_data, new_bitset_size);
+		memcpy(new_elmts, elmts, (uintptr_t)pool->cap * elmt_size);
+
+		//
+		// deallocate the old buffer.
+		vui_mem_dealloc(_vui.allocator, data, cap_bytes, alignof(uint8_t));
+	}
+
+	//
+	// setup the free list, by visiting each element and store an
+	// index to the next element.
+	for (uint32_t i = pool->cap; i < new_cap; i += 1) {
+		*(uint32_t*)vui_ptr_add(vui_ptr_add(new_data, new_bitset_size), i * elmt_size) = i + 2;
+	}
+
+	pool->data = new_data;
+	pool->free_list_head_id = pool->cap + 1;
+	pool->cap = new_cap;
+	pool->elmts_start_byte_idx = new_bitset_size;
+	return vui_true;
+}
+
+VuiBool _VuiPool_reset_and_populate(_VuiPool* pool, void* elmts, uint32_t count, uintptr_t elmt_size, uintptr_t elmt_align) {
+	_VuiPool_reset(pool, elmt_size);
+	if (pool->cap < count) {
+		if (!_VuiPool_resize_cap(pool, vui_max(pool->cap ? pool->cap * 2 : 64, count), elmt_size, elmt_align))
+			return vui_false;
+	}
+
+	//
+	// set the elements to allocated.
+	// the last byte is set manually as only some of the bits will be on.
+	memset(pool->data, 0xff, count / 8);
+	uint32_t remaining_count = count % 8;
+	if (remaining_count) ((uint8_t*)pool->data)[count / 8] = (1 << remaining_count) - 1;
+
+	//
+	// copy the elements and set the values in the pool structure
+	memcpy(vui_ptr_add(pool->data, pool->elmts_start_byte_idx), elmts, (uintptr_t)count * elmt_size);
+	pool->count = count;
+	pool->free_list_head_id = count + 1;
+
+	return vui_true;
+}
+
+void _VuiPool_init(_VuiPool* pool, uint32_t cap, uintptr_t elmt_size, uintptr_t elmt_align) {
+	uintptr_t bitset_size = (cap / 8) + 1;
+	uintptr_t elmts_start_byte_idx = (uintptr_t)vui_ptr_round_up_align((void*)bitset_size, elmt_align);
+	uintptr_t cap_bytes = ((uintptr_t)cap * elmt_size) + elmts_start_byte_idx;
+	pool->data = vui_mem_alloc(_vui.allocator, cap_bytes, elmt_align);
+	memset(vui_ptr_add(pool->data, elmts_start_byte_idx), 0, (uintptr_t)cap * elmt_size);
+
+	pool->elmts_start_byte_idx = elmts_start_byte_idx;
+	pool->cap = cap;
+	_VuiPool_reset(pool, elmt_size);
+	pool->free_list_head_id = 1;
+}
+
+void _VuiPool_deinit(_VuiPool* pool, uintptr_t elmt_size, uintptr_t elmt_align) {
+	uintptr_t bitset_size = (pool->cap / 8) + 1;
+	uintptr_t elmts_start_byte_idx = (uintptr_t)vui_ptr_round_up_align((void*)bitset_size, elmt_align);
+	uintptr_t cap = ((uintptr_t)pool->cap * elmt_size) + elmts_start_byte_idx;
+	vui_mem_dealloc(_vui.allocator, pool->data, cap, elmt_align);
+	*pool = (_VuiPool){0};
+}
+
+void* _VuiPool_alloc(_VuiPool* pool, VuiPoolId* id_out, uintptr_t elmt_size, uintptr_t elmt_align) {
+	if (pool->count == pool->cap) {
+		if (!_VuiPool_resize_cap(pool, pool->cap ? pool->cap * 2 : 64, elmt_size, elmt_align)) {
+			return NULL;
+		}
+	}
+
+	//
+	// allocate an element and remove it from the free list
+	uintptr_t alloced_id = pool->free_list_head_id;
+	vui_debug_assert(!_VuiPool_is_allocated(pool, alloced_id - 1), "allocated element is in the free list of the pool");
+	_VuiPool_set_allocated(pool, alloced_id - 1);
+	uint32_t* alloced_elmt = (uint32_t*)vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((alloced_id - 1) * elmt_size));
+	pool->free_list_head_id = *alloced_elmt;
+
+	pool->count += 1;
+	*id_out = alloced_id;
+	return alloced_elmt;
+}
+
+void _VuiPool_assert_id(_VuiPool* pool, uint32_t elmt_id) {
+	vui_debug_assert(elmt_id, "elmt_id is null, cannot deallocate a null element");
+	vui_debug_assert(elmt_id <= pool->cap, "elmt_id is out of the memory boundary of the pool. idx is '%u' but cap is '%u'",
+		elmt_id - 1, pool->cap);
+	vui_debug_assert(_VuiPool_is_allocated(pool, elmt_id - 1), "cannot get pointer to a element that is not allocated");
+}
+
+void _VuiPool_dealloc(_VuiPool* pool, uint32_t elmt_id, uintptr_t elmt_size, uintptr_t elmt_align) {
+	_VuiPool_assert_id(pool, elmt_id);
+
+	uint32_t* elmt_next_free_id = &pool->free_list_head_id;
+	void* elmts = vui_ptr_add(pool->data, pool->elmts_start_byte_idx);
+	//
+	// the free list is stored in low to high order, to try to keep allocations near eachother.
+	// move up the free list until elmt_id is less than that node.
+	while (1) {
+		uint32_t nfi = *elmt_next_free_id;
+		if (nfi > elmt_id || nfi == pool->cap) break;
+		elmt_next_free_id = (uint32_t*)vui_ptr_add(elmts, ((uintptr_t)nfi - 1) * elmt_size);
+	}
+
+	_VuiPool_set_free(pool, elmt_id - 1);
+	// point to the next element in the list
+	*(uint32_t*)vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((uintptr_t)(elmt_id - 1) * elmt_size)) = *elmt_next_free_id;
+	// get the previous element to point to this newly deallocated block
+	*elmt_next_free_id = elmt_id;
+	pool->count -= 1;
+}
+
+void* _VuiPool_id_to_ptr(_VuiPool* pool, VuiPoolId elmt_id, uintptr_t elmt_size) {
+	_VuiPool_assert_id(pool, elmt_id);
+	return vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx + ((uintptr_t)(elmt_id - 1) * elmt_size));
+}
+
+VuiPoolId _VuiPool_ptr_to_id(_VuiPool* pool, void* ptr, uintptr_t elmt_size) {
+	return (vui_ptr_diff(ptr, vui_ptr_add(pool->data, (uintptr_t)pool->elmts_start_byte_idx)) / elmt_size) + 1;
+}
+
+
+// ===========================================================================================
+//
+//
 // Misc Helpers
 //
 //
@@ -576,8 +594,7 @@ RESIZE_CAP: {}
 		if (new_count > new_cap)
 			new_cap = new_count;
 
-		stk = _VuiStk_resize_cap(stk, new_cap, elmt_size);
-		if (stk == NULL) return NULL;
+		if (!_VuiStk_resize_cap(&stk, new_cap, elmt_size)) return NULL;
 	}
 
 	*stk_ptr = stk;
@@ -608,23 +625,25 @@ void* _VuiStk_insert_many(void** stk_ptr, uint32_t idx, uint32_t elmts_count, ui
 	return elmt;
 }
 
-void* _VuiStk_resize_cap(void* stk, uint32_t new_cap, uint32_t elmt_size) {
+VuiBool _VuiStk_resize_cap(void** stk_ptr, uint32_t new_cap, uint32_t elmt_size) {
+	void* stk = *stk_ptr;
 	if (new_cap == 0) new_cap = vui_stk_init_cap;
 	uint32_t cap = VuiStk_cap(stk);
-	if (new_cap == cap) return stk;
+	if (new_cap == cap) return vui_true;
 
 	uintptr_t size = VuiStk_size(stk) + sizeof(_VuiStkHeader);
 	uintptr_t new_size = (uintptr_t)elmt_size * (uintptr_t)new_cap + sizeof(_VuiStkHeader);
     _VuiStkHeader* ptr = vui_mem_realloc(_vui.allocator, stk ? _VuiStk_header(stk) : NULL, size, new_size, alignof(void*));
-	if (ptr == NULL) return NULL;
+	if (ptr == NULL) return vui_false;
 
 	ptr->cap = new_cap;
 
 	// if the stk was uninitialized set its size to 0
     if (!stk) ptr->count = 0;
 
-	// return the new stack pointer.
-	return (void*)((char*)ptr + sizeof(_VuiStkHeader));
+	// set the new stack pointer.
+	*stk_ptr = (void*)((char*)ptr + sizeof(_VuiStkHeader));
+	return vui_true;
 }
 
 void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx, uint32_t elmt_size) {
@@ -724,7 +743,7 @@ uint32_t _vui_string_remove_range_shift(char* string, uint32_t string_len, uint3
 	return string_len;
 }
 
-void vui_input_add_text(char* string, uint32_t string_length) {
+void vui_input_add_text(const char* string, uint32_t string_length) {
 	// ignore if a text box is not focused
 	if (_vui.input.focused_text_box.string == NULL) return;
 
@@ -856,7 +875,6 @@ void vui_ctrl_set_focused(VuiCtrlId ctrl_id) {
 
 	w->focused_ctrl_id = ctrl_id;
 	if (_vui.input.focused_text_box.string) {
-		_vui.text_box_focus_change_fn(vui_false);
 		_vui.input.focused_text_box.string = NULL;
 		_vui.input.focused_text_box.string_len = 0;
 		_vui.input.focused_text_box.string_cap = 0;
@@ -1428,7 +1446,7 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, left_top, _vui_render_glyph);
+		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, wrap_at_width, left_top, _vui_render_glyph);
 	}
 }
 
@@ -1520,9 +1538,7 @@ void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor 
 	VuiRect clip_rect = _vui.render.clip_rect;
 	for (uint32_t idx = 0; idx < points_count; idx += 1) {
 		VuiVertex* vert = &w.verts[idx];
-		vert->pos = VuiRect_clip_pt(&clip_rect, points[idx]);
-		vert->uv = VuiVec2_zero;
-		vert->color = color;
+		*vert = VuiVertex_init(VuiRect_clip_pt(&clip_rect, points[idx]), VuiVec2_zero, color);
 	}
 
 
@@ -1626,29 +1642,19 @@ void vui_render_image_(const VuiRect* rect_ptr, float image_width, float image_h
 		uv_rect.right_bottom.y = -uv_rect.right_bottom.y;
 	}
 
-	w.verts[0] = (VuiVertex){
-		.pos = clipped_rect.left_top,
-		.uv = uv_rect.left_top,
-		.color = color,
-	};
+	w.verts[0] = VuiVertex_init(clipped_rect.left_top, uv_rect.left_top, color);
 
-	w.verts[1] = (VuiVertex){
-		.pos = VuiVec2_init(clipped_rect.right_bottom.x, clipped_rect.left_top.y),
-		.uv = VuiVec2_init(uv_rect.right_bottom.x, uv_rect.left_top.y),
-		.color = color,
-	};
+	w.verts[1] = VuiVertex_init(
+		VuiVec2_init(clipped_rect.right_bottom.x, clipped_rect.left_top.y),
+		VuiVec2_init(uv_rect.right_bottom.x, uv_rect.left_top.y),
+		color);
 
-	w.verts[2] = (VuiVertex){
-		.pos = clipped_rect.right_bottom,
-		.uv = uv_rect.right_bottom,
-		.color = color,
-	};
+	w.verts[2] = VuiVertex_init(clipped_rect.right_bottom, uv_rect.right_bottom, color);
 
-	w.verts[3] = (VuiVertex){
-		.pos = VuiVec2_init(clipped_rect.left_top.x, clipped_rect.right_bottom.y),
-		.uv = VuiVec2_init(uv_rect.left_top.x, uv_rect.right_bottom.y),
-		.color = color,
-	};
+	w.verts[3] = VuiVertex_init(
+		VuiVec2_init(clipped_rect.left_top.x, clipped_rect.right_bottom.y),
+		VuiVec2_init(uv_rect.left_top.x, uv_rect.right_bottom.y),
+		color);
 
 	w.indices[0] = w.verts_start_idx;
 	w.indices[1] = w.verts_start_idx + 1;
@@ -1938,7 +1944,7 @@ void VuiProgressBar_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* co
 }
 
 static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id, float line_height) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, VuiVec2_zero, NULL);
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, wrap_at_width, VuiVec2_zero, NULL);
 }
 
 void VuiTextBoxCursor_render(VuiCtrl* ctrl, const VuiCtrlStyle* _style, VuiRect* content_rect) {
@@ -2894,7 +2900,6 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 				// so if we gain focus, copy the result to the edit buffer.
 				strncpy(_vui.input.input_box.edit_string, _vui.input.input_box.string, _vui_input_box_cap);
 			}
-			_vui.text_box_focus_change_fn(vui_true);
 			_vui.input.focused_text_box.string = string_in_out;
 			_vui.input.focused_text_box.string_len = strlen(string_in_out);
 			_vui.input.focused_text_box.string_cap = string_in_out_cap;
@@ -3023,12 +3028,14 @@ VuiBool vui_init(VuiSetup* setup) {
 	_vui = (_Vui){0};
 	_vui.position_text_fn = setup->position_text_fn;
 	_vui.position_text_userdata = setup->position_text_userdata;
-	_vui.text_box_focus_change_fn = setup->text_box_focus_change_fn;
 	_vui.allocator = setup->allocator;
 	_VuiArenaAlctor_init(&_vui.frame_data_alctor);
 	_vui.windows = vui_mem_alloc_array(_VuiWindow, _vui.allocator, setup->windows_count);
 	memset(_vui.windows, 0, setup->windows_count * sizeof(*_vui.windows));
 	_vui.windows_count = setup->windows_count;
+
+	vui_ss.text_header.font_id = setup->default_font_id;
+	vui_ss.text_menu.font_id = setup->default_font_id;
 	return vui_true;
 }
 
@@ -4103,8 +4110,7 @@ VuiWindowRender* vui_window_render(VuiWindowId id, float scale_factor, VuiBool p
 		if (scale_factor != 1.0) {
 			VuiVertex* verts = layer->verts;
 			for (int v_idx = 0; v_idx < VuiStk_count(layer->verts); v_idx += 1) {
-				verts[v_idx].pos.x = verts[v_idx].pos.x * scale_factor;
-				verts[v_idx].pos.y = verts[v_idx].pos.y * scale_factor;
+				VuiVertex_scale_pos(verts[v_idx], scale_factor);
 			}
 		}
 		hash = vui_fnv_hash_64((char*)layer->cmds, VuiStk_count(layer->cmds) * sizeof(VuiRenderCmd), hash);
@@ -4170,17 +4176,7 @@ void vui_window_dump_render(VuiWindowId id, FILE* file) {
 		VuiVertex* verts = layer->verts;
 		for (int vert_idx = 0; vert_idx < VuiStk_count(layer->verts); vert_idx += 1) {
 			VuiVertex* vert = &verts[vert_idx];
-			fprintf(file,
-					"\t%u: { pos: [%f, %f], uv: [%f, %f], color: #%.2x%.2x%.2x%.2x }\n",
-					vert_idx,
-					vert->pos.x,
-					vert->pos.y,
-					vert->uv.x,
-					vert->uv.y,
-					vert->color.r,
-					vert->color.g,
-					vert->color.b,
-					vert->color.a);
+			VuiVertex_debug_fprintf(vert, file);
 		}
 		fprintf(file, "}\n");
 
