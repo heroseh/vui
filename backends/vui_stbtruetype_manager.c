@@ -382,8 +382,8 @@ VuiBool vui_stbtt_glyph_texture_pack(VuiGlyphTextureId glyph_texture_id) {
 		gr->offset = VuiRect_init(
 			(float)offset_x * recip_h + sub_x,
 			(float)offset_y * recip_v + sub_y,
-			(offset_x + w) * recip_h + sub_x,
-			(offset_y + h) * recip_v + sub_y
+			(float)offset_ex * recip_h + sub_x,
+			(float)offset_ey * recip_v + sub_y
 		);
 
 		//
