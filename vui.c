@@ -2877,8 +2877,9 @@ void vui_scroll_view_end() {
 
 VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT], _VuiInputBoxType type) {
 	vui_scope_height(vui_auto_len)
-	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable, 0, NULL, VuiTextBoxStyle_interp, NULL);
-	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal, 0, NULL, VuiTextBoxStyle_interp, NULL);
+	VuiCtrlId text_box_ctrl_id = _vui.build.parent_ctrl_id;
+	VuiCtrl* ctrl = vui_ctrl_get(text_box_ctrl_id);
 
 	//
 	// target the style that reflects the state of the control.
@@ -2911,6 +2912,29 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 			// check to see if the text has changed.
 			has_changed = _vui.input.focused_text_box.has_changed;
 		}
+
+		{
+			//
+			// workout the scroll offset of the scroll when the cursor is outside of the box's inner boundary.
+			//
+			uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+			VuiVec2 cursor_offset = vui_get_text_size(_vui.input.focused_text_box.string, cursor_idx, 0.f, text_style->font_id, text_style->line_height);
+
+			float margin_padding = VuiThickness_horizontal(&style->padding) + VuiThickness_horizontal(&text_style->margin);
+			float box_inner_size = VuiRect_width(&ctrl->rect) - margin_padding - style->border_width * 2.f;
+			float scroll_offset = ctrl->scroll_offset.x;
+			float cursor_offset_rel = cursor_offset.x + scroll_offset;
+
+			if (cursor_offset_rel >= box_inner_size) {
+				scroll_offset -= (cursor_offset_rel - box_inner_size) + style->cursor_width + margin_padding;
+			} else if (cursor_offset_rel < 0.f) {
+				scroll_offset += (0.f - cursor_offset_rel) + style->cursor_width + margin_padding;
+			}
+
+			scroll_offset = vui_clamp(scroll_offset, -cursor_offset.x, 0.f);
+
+			ctrl->scroll_offset.x = scroll_offset;
+		}
 	}
 
 	vui_scope_offset(0.f, 0.f)
@@ -2918,6 +2942,9 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 		//
 		// the text of the text box
 		vui_text_(vui_sib_id, string_in_out, strlen(string_in_out), 0.f, text_style);
+		VuiCtrl* text_ctrl = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
+		ctrl = vui_ctrl_get(text_box_ctrl_id);
+		ctrl->scroll_content_id = text_ctrl->id;
 
 		//
 		// the control for the cursor
@@ -3794,10 +3821,14 @@ void _vui_layout_ctrls(VuiCtrl* ctrl, VuiRect* placement_area, float parent_inne
 
 	if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
 		VuiCtrl* content_ctrl = vui_ctrl_get(ctrl->scroll_content_id);
-		content_ctrl->rect.left += ctrl->scroll_offset.x;
-		content_ctrl->rect.right += ctrl->scroll_offset.x;
-		content_ctrl->rect.top += ctrl->scroll_offset.y;
-		content_ctrl->rect.bottom += ctrl->scroll_offset.y;
+		if (ctrl->flags & VuiCtrlFlags_scrollable_horizontal) {
+			content_ctrl->rect.left += ctrl->scroll_offset.x;
+			content_ctrl->rect.right += ctrl->scroll_offset.x;
+		}
+		if (ctrl->flags & VuiCtrlFlags_scrollable_vertical) {
+			content_ctrl->rect.top += ctrl->scroll_offset.y;
+			content_ctrl->rect.bottom += ctrl->scroll_offset.y;
+		}
 	}
 
 	//
