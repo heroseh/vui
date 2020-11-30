@@ -769,6 +769,20 @@ struct VuiRadioButtonStyle {
 
 extern void VuiRadioButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
 
+typedef struct VuiSliderStyle VuiSliderStyle;
+struct VuiSliderStyle {
+	union {
+		inline_VuiCtrlStyle;
+		VuiCtrlStyle ctrl;
+	};
+	const VuiCtrlStyle* bar_style;
+	const VuiButtonStyle* button_style; // points to an array of styles, one for for each VuiCtrlState value
+	float bar_height;
+	float button_width;
+};
+
+extern void VuiSliderStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+
 typedef struct VuiProgressBarStyle VuiProgressBarStyle;
 struct VuiProgressBarStyle {
 	union {
@@ -835,6 +849,8 @@ extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to,
 #define vui_separator_size_default 4.f
 #define vui_check_size_default 20.f
 #define vui_cursor_width_default 2.f
+#define vui_slider_bar_height_default 16.f
+#define vui_slider_button_width_default 32.f
 
 #define vui_color_white VuiColor_init(0xfa, 0xfa, 0xfa, 0xff)
 #define vui_color_gray VuiColor_init(0xbd, 0xbd, 0xbd, 0xff)
@@ -878,6 +894,8 @@ typedef struct {
 	VuiButtonStyle select_button[VuiCtrlState_COUNT];
 	VuiCheckBoxStyle check_box[VuiCtrlState_COUNT];
 	VuiRadioButtonStyle radio_button[VuiCtrlState_COUNT];
+	VuiCtrlStyle slider_bar;
+	VuiSliderStyle slider;
 	VuiProgressBarStyle progress_bar;
 	VuiTextBoxStyle text_box[VuiCtrlState_COUNT];
 	VuiCtrlStyle text_box_selection;
@@ -1183,6 +1201,19 @@ extern VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_
 extern VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
 extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
 
+// ====================================================================================
+//
+//
+// Slider - a control used to manipulate a value using a slider.
+//
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+// @param value_out: a pointer to the value to be manipulated.
+//               the value will start at @param(min) and end at @param(max).
+//
+extern void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiSliderStyle* style);
+extern void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiSliderStyle* style);
+extern void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiSliderStyle* style);
 
 // ====================================================================================
 //

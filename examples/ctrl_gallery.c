@@ -158,11 +158,11 @@ void build_ui() {
 			static float value = 0.f;
 			static VuiBool go_backward = vui_false;
 			if (go_backward) {
-				value -= 0.5;
+				value -= 2.5;
 			} else {
-				value += 0.5;
+				value += 2.5;
 			}
-			if (value >= 100.f)  {
+			if (value >= 500.f)  {
 				go_backward = vui_true;
 			} else if (value <= 0.f)  {
 				go_backward = vui_false;
@@ -171,7 +171,7 @@ void build_ui() {
 
 			vui_scope_width(200.f)
 			vui_scope_height(40.f)
-			vui_progress_bar(vui_sib_id, value, 0.f, 100.f, &vui_ss.progress_bar);
+			vui_progress_bar(vui_sib_id, value, 0.f, 500.f, &vui_ss.progress_bar);
 		}
 
 		vui_text(vui_sib_id, "Text & Input Boxes", 0.f, &vui_ss.text_header);
@@ -192,8 +192,10 @@ void build_ui() {
 			vui_scope_align(VuiAlign_left_center) {
 				vui_text(vui_sib_id, "Uint:  ", 0.f, &vui_ss.text_menu);
 				static uint32_t value = 0;
-				vui_scope_width(200.f)
-				vui_input_box_uint(vui_sib_id, &value, vui_ss.text_box);
+				vui_scope_width(200.f) {
+					vui_input_box_uint(vui_sib_id, &value, vui_ss.text_box);
+					vui_slider_uint(vui_sib_id, &value, 0, 5, &vui_ss.slider);
+				}
 			}
 		}
 		vui_scope_ctrl(vui_sib_id, NULL) {
@@ -202,8 +204,10 @@ void build_ui() {
 			vui_scope_align(VuiAlign_left_center) {
 				vui_text(vui_sib_id, "Sint:  ", 0.f, &vui_ss.text_menu);
 				static int32_t value = 0;
-				vui_scope_width(200.f)
-				vui_input_box_sint(vui_sib_id, &value, vui_ss.text_box);
+				vui_scope_width(200.f) {
+					vui_input_box_sint(vui_sib_id, &value, vui_ss.text_box);
+					vui_slider_sint(vui_sib_id, &value, -10, 10, &vui_ss.slider);
+				}
 			}
 		}
 		vui_scope_ctrl(vui_sib_id, NULL) {
@@ -212,8 +216,10 @@ void build_ui() {
 			vui_scope_align(VuiAlign_left_center) {
 				vui_text(vui_sib_id, "Float: ", 0.f, &vui_ss.text_menu);
 				static float value = 0;
-				vui_scope_width(200.f)
-				vui_input_box_float(vui_sib_id, &value, vui_ss.text_box);
+				vui_scope_width(200.f) {
+					vui_input_box_float(vui_sib_id, &value, vui_ss.text_box);
+					vui_slider_float(vui_sib_id, &value, -500.f, 500.f, &vui_ss.slider);
+				}
 			}
 		}
 	}
@@ -584,6 +590,7 @@ int main(int argc, char** argv) {
 					switch (event.window.event) {
 						case SDL_WINDOWEVENT_RESIZED:
 							mat4x4_ortho(app.opengl.projection, 0.f, event.window.data1, event.window.data2, 0.f, 1.f, 0.f);
+							glViewport(0, 0, event.window.data1, event.window.data2);
 							break;
 					}
 					break;

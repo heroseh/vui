@@ -1074,6 +1074,15 @@ void VuiRadioButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, co
 	VuiCtrlStyle_interp(result, to, from, interp_ratio);
 }
 
+void VuiSliderStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
+	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiSliderStyle* result_ = (VuiSliderStyle*)result;
+	VuiSliderStyle* to_ = (VuiSliderStyle*)to;
+	VuiSliderStyle* from_ = (VuiSliderStyle*)from;
+	result_->button_width = vui_lerp(to_->button_width, from_->button_width, interp_ratio);
+	result_->bar_height = vui_lerp(to_->bar_height, from_->button_width, interp_ratio);
+}
+
 void VuiProgressBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
 	VuiCtrlStyle_interp(result, to, from, interp_ratio);
 	VuiProgressBarStyle* result_ = (VuiProgressBarStyle*)result;
@@ -1319,6 +1328,21 @@ VuiStyleSheet vui_ss = {
 			.cursor_color = vui_color_amethyst,
 			.cursor_width = vui_cursor_width_default,
 		},
+	},
+	.slider_bar = {
+		.margin = vui_margin_default,
+		.padding = vui_padding_default,
+		.bg_color = vui_color_midnight_blue,
+		.border_color = vui_color_concrete,
+		.border_width = vui_border_width_default,
+		.radius = vui_radius_default,
+	},
+	.slider = {
+		.margin = vui_margin_default,
+		.bar_style = &vui_ss.slider_bar,
+		.button_style = vui_ss.button_action,
+		.bar_height = vui_slider_bar_height_default,
+		.button_width = vui_slider_button_width_default,
 	},
 	.progress_bar = {
 		.margin = vui_margin_default,
@@ -2544,6 +2568,92 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 
 	vui_ctrl_end();
 	return state;
+}
+
+typedef uint8_t _VuiSliderType;
+enum {
+	_VuiSliderType_float,
+	_VuiSliderType_u32,
+	_VuiSliderType_s32,
+};
+
+void _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, const VuiSliderStyle* style, _VuiSliderType type) {
+	vui_scope_height(vui_auto_len)
+	vui_scope_layout_wrap(vui_false)
+	vui_ctrl_start_(sib_id, 0, 0, &style->ctrl, VuiSliderStyle_interp, NULL);
+
+	vui_scope_align(VuiAlign_left_top) {
+		VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
+
+		//
+		// create the bar of the slider. the bar is shrunk by the button width and the margin to fit it inside the parent's clipping rectangle.
+		float parent_inner_width = VuiRect_width(&parent->rect) - VuiThickness_horizontal(&parent->style->padding) - parent->style->border_width * 2.f;
+		float bar_width = parent_inner_width - style->button_width - VuiThickness_horizontal(&style->bar_style->margin);
+		vui_scope_width(bar_width)
+		vui_scope_height(style->bar_height)
+		vui_scope_offset(style->button_width * 0.5f, style->button_width * 0.25f)
+		vui_ctrl(vui_sib_id, style->bar_style);
+
+		//
+		// calculate the button's offset by using the size of the bar and it's margin.
+		VuiCtrlId bar_ctrl_id = _vui.build.sibling_prev_ctrl_id;
+		VuiCtrl* bar = vui_ctrl_get(bar_ctrl_id);
+		float ratio_value_to_screen = VuiRect_width(&bar->rect);
+		float button_offset;
+		switch (type) {
+			case _VuiSliderType_float:
+				ratio_value_to_screen /= *(float*)max - *(float*)min;
+				button_offset = ratio_value_to_screen * (*(float*)value_out - *(float*)min);
+				break;
+			case _VuiSliderType_u32:
+				ratio_value_to_screen /= *(uint32_t*)max - *(uint32_t*)min;
+				button_offset = ratio_value_to_screen * (*(uint32_t*)value_out - *(uint32_t*)min);
+				break;
+			case _VuiSliderType_s32:
+				ratio_value_to_screen /= *(int32_t*)max - *(int32_t*)min;
+				button_offset = ratio_value_to_screen * (*(int32_t*)value_out - *(int32_t*)min);
+				break;
+		}
+
+		button_offset += style->bar_style->margin.left - style->button_style->margin.left;
+
+		//
+		// make the button and if it is held down, then modify the value.
+		vui_scope_offset(button_offset, style->bar_style->margin.top - style->button_style->margin.top)
+		vui_scope_width(style->button_width)
+		vui_scope_height(style->button_width)
+		if (vui_button(vui_sib_id, style->button_style) & VuiFocusState_held) {
+			bar = vui_ctrl_get(bar_ctrl_id);
+			float mouse_offset = _vui.input.mouse.x - bar->rect.left;
+			if (mouse_offset < 0.f) mouse_offset = 0.f;
+			float value = mouse_offset / ratio_value_to_screen;
+			switch (type) {
+				case _VuiSliderType_float: *(float*)value_out = value + *(float*)min; break;
+				case _VuiSliderType_u32: *(uint32_t*)value_out = (uint32_t)roundf(value) + *(uint32_t*)min; break;
+				case _VuiSliderType_s32: *(int32_t*)value_out =  (int32_t)roundf(value) + *(int32_t*)min; break;
+			}
+		}
+	}
+
+	vui_ctrl_end();
+}
+
+void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiSliderStyle* style) {
+	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+	_vui_slider(sib_id, value_out, &min, &max, style, _VuiSliderType_u32);
+	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+}
+
+void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiSliderStyle* style) {
+	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+	_vui_slider(sib_id, value_out, &min, &max, style, _VuiSliderType_s32);
+	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+}
+
+void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiSliderStyle* style) {
+	*value_out = vui_clamp(*value_out, min, max);
+	_vui_slider(sib_id, value_out, &min, &max, style, _VuiSliderType_float);
+	*value_out = vui_clamp(*value_out, min, max);
 }
 
 void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiProgressBarStyle* style) {
