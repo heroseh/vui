@@ -569,6 +569,47 @@ noreturn void _vui_abort(const char* file, int line, const char* func, char* ass
 	abort();
 }
 
+uint32_t vui_utf8_codepoint(char* str, int32_t* out_codepoint) {
+	uint32_t bytes = 0;
+	if (0xf0 == (0xf8 & str[0])) {
+		// 4 byte utf8 codepoint
+		*out_codepoint = ((0x07 & str[0]) << 18) | ((0x3f & str[1]) << 12) |
+		((0x3f & str[2]) << 6) | (0x3f & str[3]);
+		bytes = 4;
+	} else if (0xe0 == (0xf0 & str[0])) {
+		// 3 byte utf8 codepoint
+		*out_codepoint =
+		((0x0f & str[0]) << 12) | ((0x3f & str[1]) << 6) | (0x3f & str[2]);
+		bytes = 3;
+	} else if (0xc0 == (0xe0 & str[0])) {
+		// 2 byte utf8 codepoint
+		*out_codepoint = ((0x1f & str[0]) << 6) | (0x3f & str[1]);
+		bytes = 2;
+	} else {
+		// 1 byte utf8 codepoint otherwise
+		*out_codepoint = str[0];
+		bytes = 1;
+	}
+
+	return bytes;
+}
+
+
+VuiBool vui_is_word_delimiter(int32_t codept) {
+	// all of the control characters are delimiters
+	if (codept < 32) return vui_true;
+
+	char word_delimiters[] = " ,.-!?:;";
+
+	int32_t delimiter = 0;
+	uint32_t delimiter_i = 0;
+	while (delimiter_i < sizeof(word_delimiters)) {
+		delimiter_i += vui_utf8_codepoint(&word_delimiters[delimiter_i], &delimiter);
+		if (delimiter == codept) return vui_true;
+	}
+	return vui_false;
+}
+
 // ===========================================================================================
 //
 //
@@ -1467,10 +1508,10 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 	vui_render_image_(rect, 0.f, 0.f, glyph_texture_id, *uv_rect, _vui_render_glyph_color, VuiImageScaleMode_stretch, vui_true);
 }
 
-void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width) {
+void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, wrap_at_width, left_top, _vui_render_glyph);
+		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, left_top, _vui_render_glyph);
 	}
 }
 
@@ -1952,7 +1993,7 @@ void VuiImage_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_
 void VuiText_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
 	const VuiTextStyle* style_ = (VuiTextStyle*)style;
 	char* text = &_vui.render.w->text[ctrl->text_start_idx];
-	vui_render_text(content_rect->left_top, style_->font_id, style_->line_height, text, ctrl->text_length, style_->color, ctrl->text_wrap_width);
+	vui_render_text(content_rect->left_top, style_->font_id, style_->line_height, text, ctrl->text_length, style_->color, ctrl->text_word_wrap_at_width);
 }
 
 void VuiCheckBoxCheck_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect) {
@@ -1967,8 +2008,8 @@ void VuiProgressBar_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* co
 	vui_render_rect(content_rect, ((VuiProgressBarStyle*)parent->style)->bar_color, parent->style->radius);
 }
 
-static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float wrap_at_width, VuiFontId font_id, float line_height) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, wrap_at_width, VuiVec2_zero, NULL);
+static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height) {
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, NULL);
 }
 
 void VuiTextBoxCursor_render(VuiCtrl* ctrl, const VuiCtrlStyle* _style, VuiRect* content_rect) {
@@ -2106,7 +2147,7 @@ void vui_ctrl_end() {
 	_vui.build.sibling_prev_ctrl_id = ctrl->id;
 }
 
-void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width, const VuiTextStyle* style) {
+void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float word_wrap_at_width, const VuiTextStyle* style) {
 	uint32_t text_start_idx = VuiStk_count(_vui.build.w->text);
 	if (text_length) {
 		char* t = VuiStk_push_many(&_vui.build.w->text, text_length);
@@ -2116,7 +2157,7 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 
 	VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-	VuiVec2 size = vui_get_text_size(text, text_length, wrap_at_width, style->font_id, style->line_height);
+	VuiVec2 size = vui_get_text_size(text, text_length, word_wrap_at_width, style->font_id, style->line_height);
 	if (size.y == 0.f) {
 		size.y = style->line_height;
 	}
@@ -2130,7 +2171,7 @@ void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap
 		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 		ctrl->text_start_idx = text_start_idx;
 		ctrl->text_length = text_length;
-		ctrl->text_wrap_width = wrap_at_width;
+		ctrl->text_word_wrap_at_width = word_wrap_at_width;
 		vui_ctrl_end();
 	}
 }

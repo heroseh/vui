@@ -102,6 +102,7 @@ void build_ui() {
 
 	vui_row_layout();
 	{
+
 		vui_text(vui_sib_id, "Buttons", 0.f, &vui_ss.text_header);
 		vui_separator(vui_sib_id, &vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
@@ -222,6 +223,18 @@ void build_ui() {
 				}
 			}
 		}
+
+		vui_text(vui_sib_id, "Text Wrapping", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+
+		static float word_wrap_at_width = 0.f;
+		vui_scope_width(200.f) {
+			vui_input_box_float(vui_sib_id, &word_wrap_at_width, vui_ss.text_box);
+			vui_slider_float(vui_sib_id, &word_wrap_at_width, 0.f, 1000.f, &vui_ss.slider);
+		}
+
+		vui_text(vui_sib_id, "This is an example of multi-line word-wrapping that has been...\nDesigned to be used as a test!!!\nDrag the slider to change the word_wrap_at_width value...\n\n...\n", word_wrap_at_width, &vui_ss.text_header);
+
 	}
 	vui_scroll_view_end();
 

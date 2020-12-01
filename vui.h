@@ -105,6 +105,9 @@ static inline void* vui_ptr_round_down_align(void* ptr, uintptr_t align) {
 
 #define _vui_defer_loop(start_expr, end_expr) for (int _i_ = (start_expr, 0); _i_ < 1; _i_ += 1, end_expr)
 
+uint32_t vui_utf8_codepoint(char* str, int32_t* out_codepoint);
+VuiBool vui_is_word_delimiter(int32_t codept);
+
 // ===========================================================================================
 //
 //
@@ -674,7 +677,7 @@ struct VuiCtrl {
 		struct {
 			uint32_t text_start_idx;
 			uint32_t text_length;
-			uint32_t text_wrap_width;
+			uint32_t text_word_wrap_at_width;
 		};
 		struct {
 			VuiVec2 scroll_view_size;
@@ -984,7 +987,7 @@ extern void vui_render_triangle(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color)
 extern void vui_render_triangle_border(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color, float width);
 extern void vui_render_circle(VuiVec2 pos, float radius, VuiColor color);
 extern void vui_render_circle_border(VuiVec2 pos, float radius, VuiColor color, float width);
-extern void vui_render_text(VuiVec2 pos, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float wrap_at_width);
+extern void vui_render_text(VuiVec2 pos, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width);
 extern void vui_render_polyline(VuiVec2* points, uint32_t points_count, VuiColor color, float width, VuiBool connect_first_and_last);
 extern void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
 extern void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_anchor_pos, VuiVec2 end_anchor_pos, VuiColor color, float width);
@@ -1054,10 +1057,10 @@ static inline void vui_ctrl(VuiCtrlSibId sib_id, const VuiCtrlStyle* style) {
 //
 // @param text: the text to be displayed
 // @param text_length: the length of text in bytes
-// @param wrap_at_width = 0.0 to not have word wrapping
+// @param word_wrap_at_width = 0.0 to not have word wrapping
 //
-#define vui_text(sib_id, text, wrap_at_width, style) vui_text_(sib_id, text, strlen(text), wrap_at_width, style)
-extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float wrap_at_width, const VuiTextStyle* style);
+#define vui_text(sib_id, text, word_wrap_at_width, style) vui_text_(sib_id, text, strlen(text), word_wrap_at_width, style)
+extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float word_wrap_at_width, const VuiTextStyle* style);
 
 // ====================================================================================
 //
@@ -1328,7 +1331,7 @@ extern void vui_image_remove(VuiImageId image_id);
 typedef uint16_t VuiViewportId;
 
 typedef void (*VuiRenderGlyphFn)(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect);
-typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
+typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
 typedef void (*VuiTextBoxFocusChange)(VuiBool focused);
 
 typedef struct {
