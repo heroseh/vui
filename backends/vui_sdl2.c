@@ -115,7 +115,7 @@ void vui_sdl2_process_event(const SDL_Event* e) {
 				case SDLK_HOME: s->actions |= VuiInputActions_home; break;
 				case SDLK_END: s->actions |= VuiInputActions_end; break;
 				case SDLK_TAB: s->actions |= VuiInputActions_focus_next; break;
-				case SDLK_RETURN: s->actions |= VuiInputActions_focus_pressed; s->space_is_pressed = 1; break;
+				case SDLK_RETURN: s->actions |= VuiInputActions_enter; s->actions |= VuiInputActions_focus_pressed; s->space_is_pressed = 1; break;
 				case SDLK_SPACE: s->actions |= VuiInputActions_focus_pressed; s->enter_is_pressed = 1; break;
 			}
 			break;

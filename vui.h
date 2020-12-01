@@ -105,7 +105,7 @@ static inline void* vui_ptr_round_down_align(void* ptr, uintptr_t align) {
 
 #define _vui_defer_loop(start_expr, end_expr) for (int _i_ = (start_expr, 0); _i_ < 1; _i_ += 1, end_expr)
 
-uint32_t vui_utf8_codepoint(char* str, int32_t* out_codepoint);
+uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint);
 VuiBool vui_is_word_delimiter(int32_t codept);
 
 // ===========================================================================================
@@ -809,13 +809,18 @@ struct VuiScrollBarStyle {
 
 extern void VuiScrollBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
 
+#define inline_VuiScrollViewStyle \
+	struct { \
+		union { \
+			inline_VuiCtrlStyle; \
+			VuiCtrlStyle ctrl; \
+		}; \
+		const VuiScrollBarStyle* bar_style; \
+	}
+
 typedef struct VuiScrollViewStyle VuiScrollViewStyle;
 struct VuiScrollViewStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	const VuiScrollBarStyle* bar_style;
+	inline_VuiScrollViewStyle;
 };
 
 extern void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
@@ -823,8 +828,8 @@ extern void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* 
 typedef struct VuiTextBoxStyle VuiTextBoxStyle;
 struct VuiTextBoxStyle {
 	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
+		inline_VuiScrollViewStyle;
+		VuiScrollViewStyle scroll_view;
 	};
 	const VuiTextStyle* text_style;
 	VuiColor selection_color;
@@ -1258,6 +1263,8 @@ enum {
 	VuiScrollFlags_horizontal = 0x8,
 	VuiScrollFlags_horizontal_always_show = 0x10,
 	VuiScrollFlags_resizable = 0x20,
+	VuiScrollFlags_vh = VuiScrollFlags_vertical | VuiScrollFlags_horizontal,
+	VuiScrollFlags_vhr = VuiScrollFlags_vertical | VuiScrollFlags_horizontal | VuiScrollFlags_resizable,
 };
 
 // ====================================================================================
@@ -1297,9 +1304,13 @@ enum {
 //        only initialize the size and do not change the size on future calls.
 //        unless the scroll view is not executed one frame and then reinitialized later.
 //
+// for vui_text_box_multiline see vui_text_box for more documentation.
+//
 #define vui_scroll_view_start(sib_id, flags, style) vui_scroll_view_start_(sib_id, NULL, NULL, flags, style)
 extern void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiScrollViewStyle* style);
 extern void vui_scroll_view_end();
+#define vui_text_box_multiline(sib_id, string_in_out, string_in_out_cap, flags, style) vui_text_box_multiline_(sib_id, string_in_out, string_in_out_cap, NULL, NULL, flags, style)
+extern VuiBool vui_text_box_multiline_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
 
 /*
 
@@ -1331,7 +1342,7 @@ extern void vui_image_remove(VuiImageId image_id);
 typedef uint16_t VuiViewportId;
 
 typedef void (*VuiRenderGlyphFn)(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect);
-typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
+typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, uint32_t cursor_num, VuiRenderGlyphFn render_glyph_fn);
 typedef void (*VuiTextBoxFocusChange)(VuiBool focused);
 
 typedef struct {

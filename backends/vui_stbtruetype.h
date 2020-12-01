@@ -28,7 +28,7 @@ VuiBool vui_stbtt_found_glyph(VuiFontId font_id, float line_height, int32_t code
 
 //
 // this is the function that gets passed in to the position_text_fn field of the VuiSetup structure when initializing VUI.
-VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn);
+VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float wrap_at_width, VuiVec2 top_left, uint32_t cursor_num, VuiRenderGlyphFn render_glyph_fn);
 
 #endif
 

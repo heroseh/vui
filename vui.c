@@ -197,6 +197,9 @@ typedef struct {
 			int32_t select_offset;
 			_VuiInputBoxType type;
 			VuiBool has_changed;
+			VuiBool is_multiline;
+			VuiBool has_cursor_moved;
+			VuiBool has_cursor_moved_last_frame;
 		} focused_text_box;
 
 		//
@@ -569,7 +572,7 @@ noreturn void _vui_abort(const char* file, int line, const char* func, char* ass
 	abort();
 }
 
-uint32_t vui_utf8_codepoint(char* str, int32_t* out_codepoint) {
+uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint) {
 	uint32_t bytes = 0;
 	if (0xf0 == (0xf8 & str[0])) {
 		// 4 byte utf8 codepoint
@@ -784,41 +787,78 @@ uint32_t _vui_string_remove_range_shift(char* string, uint32_t string_len, uint3
 	return string_len;
 }
 
+static void _vui_input_text_remove_selected() {
+	//
+	// get the selection range
+	uint32_t start_idx = _vui.input.focused_text_box.cursor_idx;
+	uint32_t end_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+	if (_vui.input.focused_text_box.select_offset < 0) {
+		uint32_t tmp = start_idx;
+		start_idx = end_idx;
+		end_idx = tmp;
+	}
+
+	//
+	// remove the selected text from the string by doing a shift remove.
+	_vui.input.focused_text_box.string_len =
+		_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
+	_vui.input.focused_text_box.cursor_idx = start_idx;
+	_vui.input.focused_text_box.select_offset = 0;
+	_vui.input.focused_text_box.has_cursor_moved = vui_true;
+}
+
+static void _vui_input_text_insert(const char* string, uint32_t string_length) {
+	char* dst_string = _vui.input.focused_text_box.string;
+	uint32_t dst_idx = _vui.input.focused_text_box.cursor_idx;
+	uint32_t dst_idx_end = dst_idx + string_length;
+
+	//
+	// if the string will exceed the capacity then reduce the string length to allow for a null terminator at the end.
+	if (dst_idx_end >= _vui.input.focused_text_box.string_cap) {
+		string_length -= (dst_idx_end - _vui.input.focused_text_box.string_cap) + 1;
+		dst_idx_end = dst_idx + string_length;
+	}
+
+	if (string_length) {
+		//
+		// shift the characters to the right of the index over by string_length.
+		if (dst_idx < _vui.input.focused_text_box.string_len) {
+			void* src = dst_string + dst_idx;
+			memmove(src + string_length, src, _vui.input.focused_text_box.string_len - dst_idx);
+		}
+
+		//
+		// insert the string
+		memcpy(&_vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx], string, string_length);
+		_vui.input.focused_text_box.cursor_idx += string_length;
+		_vui.input.focused_text_box.string_len += string_length;
+		_vui.input.focused_text_box.string[_vui.input.focused_text_box.string_len] = '\0';
+		_vui.input.focused_text_box.has_cursor_moved = vui_true;
+	}
+}
+
 void vui_input_add_text(const char* string, uint32_t string_length) {
 	// ignore if a text box is not focused
 	if (_vui.input.focused_text_box.string == NULL) return;
 
 	_vui.input.focused_text_box.has_changed = vui_true;
 	if (_vui.input.focused_text_box.select_offset != 0) { // if we are selecting
-		//
-		// get the selection range
-		uint32_t start_idx = _vui.input.focused_text_box.cursor_idx;
-		uint32_t end_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
-		if (_vui.input.focused_text_box.select_offset < 0) {
-			uint32_t tmp = start_idx;
-			start_idx = end_idx;
-			end_idx = tmp;
-		}
-
-		//
-		// remove the selected text from the string by doing a shift remove.
-		_vui.input.focused_text_box.string_len =
-			_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
-		_vui.input.focused_text_box.cursor_idx = start_idx;
-		_vui.input.focused_text_box.select_offset = 0;
+		_vui_input_text_remove_selected();
 	}
 
-	for (uint32_t i = 0; i < string_length; i += 1) {
-		// + 1 to give space for the null terminator.
-		if (_vui.input.focused_text_box.string_len + 1 >= _vui.input.focused_text_box.string_cap)
+	uint32_t codept_size = 0;
+	for (uint32_t i = 0; i < string_length; i += codept_size) {
+		int32_t codept = 0;
+		codept_size = vui_utf8_codepoint(&string[i], &codept);
+
+		if (_vui.input.focused_text_box.string_len + codept_size >= _vui.input.focused_text_box.string_cap)
 			break;
 
-		char ch = string[i];
 		VuiBool copy = vui_false;
 		switch (_vui.input.focused_text_box.type) {
-			case _VuiInputBoxType_text: copy = vui_true; break;
+			case _VuiInputBoxType_text: copy = !_vui.input.focused_text_box.is_multiline || codept != '\n'; break;
 			case _VuiInputBoxType_float:
-				if (ch == '.') {
+				if (codept == '.') {
 					// we have a full stop, only insert this after the first character
 					// and make sure its the only decimal place in the float string.
 					if (_vui.input.focused_text_box.cursor_idx > 0) {
@@ -836,37 +876,21 @@ void vui_input_add_text(const char* string, uint32_t string_length) {
 				if (copy) break;
 				// fallthrough
 			case _VuiInputBoxType_s32:
-				if (ch == '-') {
+				if (codept == '-') {
 					copy = _vui.input.focused_text_box.string_len == 0 ||
 						(_vui.input.focused_text_box.cursor_idx == 0 && _vui.input.focused_text_box.string[0] != '-');
 					if (copy) break;
 				}
 				// fallthrough
 			case _VuiInputBoxType_u32:
-				copy = ch >= '0' && ch <= '9';
+				copy = codept >= '0' && codept <= '9';
 				break;
 		}
 
 		//
 		// copy the byte if it is valid for this type of input box
 		if (copy) {
-			char* dst_string = _vui.input.focused_text_box.string;
-			uint32_t dst_idx = _vui.input.focused_text_box.cursor_idx;
-
-			//
-			// shift the characters to the right of the index over by one.
-			// TODO: maybe validate the string upfront and do this shift all in one go.
-			//       it is unluckly that much text will come through here in one go though.
-			if (dst_idx < _vui.input.focused_text_box.string_len) {
-				void* src = dst_string + dst_idx;
-				memmove(src + 1, src, _vui.input.focused_text_box.string_len - dst_idx);
-			}
-
-			//
-			// insert the character
-			_vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx] = ch;
-			_vui.input.focused_text_box.cursor_idx += 1;
-			_vui.input.focused_text_box.string_len += 1;
+			_vui_input_text_insert(&string[i], codept_size);
 		}
 	}
 
@@ -1141,7 +1165,7 @@ void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, con
 }
 
 void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio) {
-	VuiCtrlStyle_interp(result, to, from, interp_ratio);
+	VuiScrollViewStyle_interp(result, to, from, interp_ratio);
 }
 
 VuiStyleSheet vui_ss = {
@@ -1328,6 +1352,7 @@ VuiStyleSheet vui_ss = {
 			.border_color = vui_color_asbestos,
 			.border_width = vui_border_width_default,
 			.radius = vui_radius_default,
+			.bar_style = &vui_ss.scroll_bar,
 			.text_style = &vui_ss.text_menu,
 			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
 			.cursor_color = vui_color_amethyst,
@@ -1340,6 +1365,7 @@ VuiStyleSheet vui_ss = {
 			.border_color = vui_color_concrete,
 			.border_width = vui_border_width_default,
 			.radius = vui_radius_default,
+			.bar_style = &vui_ss.scroll_bar,
 			.text_style = &vui_ss.text_menu,
 			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
 			.cursor_color = vui_color_amethyst,
@@ -1352,6 +1378,7 @@ VuiStyleSheet vui_ss = {
 			.border_color = vui_color_concrete,
 			.border_width = vui_border_width_default,
 			.radius = vui_radius_default,
+			.bar_style = &vui_ss.scroll_bar,
 			.text_style = &vui_ss.text_menu,
 			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
 			.cursor_color = vui_color_amethyst,
@@ -1364,6 +1391,7 @@ VuiStyleSheet vui_ss = {
 			.border_color = vui_color_midnight_blue,
 			.border_width = vui_border_width_default,
 			.radius = vui_radius_default,
+			.bar_style = &vui_ss.scroll_bar,
 			.text_style = &vui_ss.text_menu,
 			.selection_color = VuiColor_init(0x34, 0x98, 0xdb, 0x80),
 			.cursor_color = vui_color_amethyst,
@@ -1511,7 +1539,7 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, left_top, _vui_render_glyph);
+		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, left_top, 0, _vui_render_glyph);
 	}
 }
 
@@ -2009,54 +2037,111 @@ void VuiProgressBar_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* co
 }
 
 static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, NULL);
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, 0, NULL);
+}
+
+static VuiVec2 vui_get_text_cursor_pos(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height, uint32_t cursor_idx) {
+	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, cursor_idx + 1, NULL);
 }
 
 void VuiTextBoxCursor_render(VuiCtrl* ctrl, const VuiCtrlStyle* _style, VuiRect* content_rect) {
 	VuiCtrl* parent = vui_ctrl_get(ctrl->parent_id);
+	if (parent->style == NULL) {
+		// move up to the scroll view if this is multiline text box
+		parent = vui_ctrl_get(parent->parent_id);
+	}
 	const VuiTextBoxStyle* style = (VuiTextBoxStyle*)parent->style;
 	const VuiTextStyle* text_style = style->text_style;
 
 	//
 	// if we are focused, render the cursor or selection box.
 	if (vui_ctrl_is_focused(parent->id) && _vui.input.focused_text_box.string) {
-		float cursor_width = 0.f;
-		VuiColor color = {0};
-
-		// get the offset to the cursor
-		VuiVec2 start_idx_offset = vui_get_text_size(_vui.input.focused_text_box.string, _vui.input.focused_text_box.cursor_idx, 0.f, text_style->font_id, text_style->line_height);
 		if (_vui.input.focused_text_box.select_offset) {
 			//
-			// we are selecting so find the other end of the selection box
-			VuiVec2 end_idx_offset = vui_get_text_size(_vui.input.focused_text_box.string,
-				_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset, 0.f, text_style->font_id, text_style->line_height);
+			// we have a selection so get the selection range in the correct order.
+			uint32_t cursor_idx_start = _vui.input.focused_text_box.cursor_idx;
+			uint32_t cursor_idx_end = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
 			if (_vui.input.focused_text_box.select_offset < 0) {
-				VuiVec2 tmp = end_idx_offset;
-				end_idx_offset = start_idx_offset;
-				start_idx_offset = tmp;
+				uint32_t tmp = cursor_idx_start;
+				cursor_idx_start = cursor_idx_end;
+				cursor_idx_end = tmp;
 			}
 
-			color = style->selection_color;
-			cursor_width = end_idx_offset.x - start_idx_offset.x;
+
+			// get the cursor offsets of both ends of the selection box.
+			VuiVec2 start_idx_offset = vui_get_text_cursor_pos(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f, text_style->font_id, text_style->line_height, cursor_idx_start);
+
+			VuiVec2 end_idx_offset = vui_get_text_cursor_pos(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f, text_style->font_id, text_style->line_height, cursor_idx_end);
+
+			//
+			// now loop line by line and render a rectangle for each line.
+			float line_height = text_style->line_height;
+			while (1) {
+				float cursor_width = 0.f;
+				if (start_idx_offset.y < end_idx_offset.y) {
+					//
+					// our selection box does not end this line.
+					// so measure until we reach a new line character.
+					// if the line is empty, then just measure a space character.
+					//
+
+					uint32_t i = cursor_idx_start;
+					while (i < _vui.input.focused_text_box.string_len && _vui.input.focused_text_box.string[i] != '\n') {
+						i += 1;
+					}
+
+					char* s = _vui.input.focused_text_box.string + cursor_idx_start;
+					uint32_t len = i - cursor_idx_start;
+					if (i == cursor_idx_start) {
+						static char space_char = ' ';
+						s = &space_char;
+						len = 1;
+					}
+					VuiVec2 size = vui_get_text_size(s, len, 0.f, text_style->font_id, text_style->line_height);
+					cursor_width = size.x;
+					cursor_idx_start = i + 1;
+				} else {
+					//
+					// our selection box ends this line, so use the difference between the start and end of the box.
+					cursor_width = end_idx_offset.x - start_idx_offset.x;
+				}
+
+				//
+				// render the rectangle
+				VuiCtrl* text_ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
+				float left = text_ctrl->rect.left + text_style->padding.left + start_idx_offset.x;
+				float top = text_ctrl->rect.top + text_style->padding.top + start_idx_offset.y;
+				VuiRect rect = VuiRect_init_wh(left, top, cursor_width, text_style->line_height);
+				vui_render_rect(&rect, style->selection_color, style->radius);
+
+				//
+				// end if we have reached the same line as the end of the selection.
+				if (start_idx_offset.y >= end_idx_offset.y) break;
+
+				//
+				// put the start of the box at the start of the next line.
+				start_idx_offset.x = 0.f;
+				start_idx_offset.y += line_height;
+			}
 		} else {
 			//
 			// no selection, we have a cursor
-			color = style->cursor_color;
-			cursor_width = style->cursor_width;
+			// get the offset to the cursor
+			VuiVec2 start_idx_offset = vui_get_text_cursor_pos(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f, text_style->font_id, text_style->line_height, _vui.input.focused_text_box.cursor_idx);
 
 			//
 			// evenly place the cursor in between two characters
 			if (_vui.input.focused_text_box.string_len > 0) {
-				start_idx_offset.x -= cursor_width / 2.f;
+				start_idx_offset.x -= style->cursor_width / 2.f;
 			}
+
+			VuiCtrl* text_ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
+			float left = text_ctrl->rect.left + text_style->padding.left + start_idx_offset.x;
+			float top = text_ctrl->rect.top + text_style->padding.top + start_idx_offset.y;
+			VuiRect rect = VuiRect_init_wh(left, top, style->cursor_width, text_style->line_height);
+
+			vui_render_rect(&rect, style->cursor_color, style->radius);
 		}
-
-		VuiCtrl* text_ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
-		float left = text_ctrl->rect.left + text_style->padding.left + start_idx_offset.x;
-		float top = text_ctrl->rect.top + text_style->padding.top;
-		VuiRect rect = VuiRect_init_wh(left, top, cursor_width, text_style->line_height);
-
-		vui_render_rect(&rect, color, style->radius);
 	}
 }
 
@@ -2093,7 +2178,8 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 	//
 	// set the new state
 	ctrl->last_frame_idx = _vui.build.frame_idx;
-	ctrl->flags = flags;
+	VuiCtrlFlags sb_flags = ctrl->flags & (_VuiCtrlFlags_show_vertical_bar | _VuiCtrlFlags_show_horizontal_bar);
+	ctrl->flags = flags | sb_flags;
 	ctrl->style_interp_fn = style_interp_fn;
 	ctrl->render_fn = render_fn;
 	if (style) {
@@ -3026,10 +3112,20 @@ void vui_scroll_view_end() {
 	vui_ctrl_end();
 }
 
-VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT], _VuiInputBoxType type) {
-	vui_scope_height(vui_auto_len)
-	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal, 0, NULL, VuiTextBoxStyle_interp, NULL);
+static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT], _VuiInputBoxType type, VuiBool is_multiline, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags) {
+	vui_scope_height(vui_auto_len) {
+		if (is_multiline) {
+			vui_scroll_view_start_(sib_id, content_offset_in_out, size_in_out, flags | VuiCtrlFlags_focusable, &styles->scroll_view);
+		} else {
+			vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal, 0, NULL, VuiTextBoxStyle_interp, NULL);
+		}
+	}
+
 	VuiCtrlId text_box_ctrl_id = _vui.build.parent_ctrl_id;
+	if (is_multiline) {
+		VuiCtrl* ctrl = vui_ctrl_get(text_box_ctrl_id);
+		text_box_ctrl_id = ctrl->parent_id;
+	}
 	VuiCtrl* ctrl = vui_ctrl_get(text_box_ctrl_id);
 
 	//
@@ -3058,33 +3154,89 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 			_vui.input.focused_text_box.cursor_idx = 0;
 			_vui.input.focused_text_box.select_offset = strlen(string_in_out);
 			_vui.input.focused_text_box.type = type;
+			_vui.input.focused_text_box.is_multiline = is_multiline;
 		} else {
 			// we have had focus before and still do.
 			// check to see if the text has changed.
 			has_changed = _vui.input.focused_text_box.has_changed;
 		}
 
-		{
+		if (_vui.input.focused_text_box.has_cursor_moved || _vui.input.focused_text_box.has_cursor_moved_last_frame) {
 			//
 			// workout the scroll offset of the scroll when the cursor is outside of the box's inner boundary.
+			// only if the cursor has moved.
 			//
-			uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
-			VuiVec2 cursor_offset = vui_get_text_size(_vui.input.focused_text_box.string, cursor_idx, 0.f, text_style->font_id, text_style->line_height);
 
-			float margin_padding = VuiThickness_horizontal(&style->padding) + VuiThickness_horizontal(&text_style->margin);
-			float box_inner_size = VuiRect_width(&ctrl->rect) - margin_padding - style->border_width * 2.f;
-			float scroll_offset = ctrl->scroll_offset.x;
-			float cursor_offset_rel = cursor_offset.x + scroll_offset;
+			float margin_padding_x = VuiThickness_horizontal(&style->padding) + VuiThickness_horizontal(&text_style->margin);
+			float box_inner_size_x = VuiRect_width(&ctrl->rect) - margin_padding_x - style->border_width * 2.f;
 
-			if (cursor_offset_rel >= box_inner_size) {
-				scroll_offset -= (cursor_offset_rel - box_inner_size) + style->cursor_width + margin_padding;
-			} else if (cursor_offset_rel < 0.f) {
-				scroll_offset += (0.f - cursor_offset_rel) + style->cursor_width + margin_padding;
+			float margin_padding_y = VuiThickness_vertical(&style->padding) + VuiThickness_vertical(&text_style->margin);
+			float box_inner_size_y = VuiRect_height(&ctrl->rect) - margin_padding_y - style->border_width * 2.f;
+
+			if (is_multiline) {
+				const VuiScrollViewStyle* sv_style = &style->scroll_view;
+				const VuiScrollBarStyle* bar_style = sv_style->bar_style;
+				const VuiButtonStyle* button_style = bar_style->slider_style;
+
+				if (ctrl->flags & _VuiCtrlFlags_show_vertical_bar) {
+					//
+					// we have a vertical scroll bar, so remove the outer width of the scroll bar from the inner size of the box
+					box_inner_size_x -= bar_style->slider_width +
+						VuiThickness_horizontal(&bar_style->margin) + VuiThickness_horizontal(&bar_style->padding) +
+						bar_style->border_width * 2.f + VuiThickness_horizontal(&button_style->margin);
+				}
+				if (ctrl->flags & _VuiCtrlFlags_show_horizontal_bar) {
+					//
+					// we have a horizontal scroll bar, so remove the outer height of the scroll bar from the inner size of the box
+					box_inner_size_y -= bar_style->slider_width +
+						VuiThickness_vertical(&bar_style->margin) + VuiThickness_vertical(&bar_style->padding) +
+						bar_style->border_width * 2.f + VuiThickness_vertical(&button_style->margin);
+				}
 			}
 
-			scroll_offset = vui_clamp(scroll_offset, -cursor_offset.x, 0.f);
 
-			ctrl->scroll_offset.x = scroll_offset;
+			//
+			// get the offset of the cursor from the top left of the inner rectangle of the control.
+			//
+			uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+			VuiVec2 cursor_offset = vui_get_text_cursor_pos(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f, text_style->font_id, text_style->line_height, cursor_idx);
+
+			//
+			// move the scroll offset for the x axis
+			// cursor_offset_rel_x is if we remove the scroll offset from our cursor_offset.
+			// this is then used to see if the cursor falls outside of the text box.
+			//
+
+			float scroll_offset_x = ctrl->scroll_offset.x;
+			float cursor_offset_rel_x = cursor_offset.x + scroll_offset_x;
+
+			if (cursor_offset_rel_x >= box_inner_size_x) {
+				scroll_offset_x -= (cursor_offset_rel_x - box_inner_size_x) + style->cursor_width + margin_padding_x;
+			} else if (cursor_offset_rel_x < 0.f) {
+				scroll_offset_x += (0.f - cursor_offset_rel_x) + style->cursor_width + margin_padding_x;
+			}
+
+			scroll_offset_x = vui_clamp(scroll_offset_x, -cursor_offset.x, 0.f);
+
+			ctrl->scroll_offset.x = scroll_offset_x;
+
+			//
+			// move the scroll offset for the y axis.
+			// see the comments above for the x axis and apply them to this code.
+			//
+
+			float scroll_offset_y = ctrl->scroll_offset.y;
+			float cursor_offset_rel_y = cursor_offset.y + text_style->line_height + scroll_offset_y;
+
+			if (cursor_offset_rel_y >= box_inner_size_y) {
+				scroll_offset_y -= (cursor_offset_rel_y - box_inner_size_y) + margin_padding_y;
+			} else if (cursor_offset_rel_y < text_style->line_height) {
+				scroll_offset_y += (0.f - cursor_offset_rel_y) + text_style->line_height + margin_padding_y;
+			}
+
+			scroll_offset_y = vui_clamp(scroll_offset_y, -(cursor_offset.y + text_style->line_height), 0.f);
+
+			ctrl->scroll_offset.y = scroll_offset_y;
 		}
 	}
 
@@ -3095,7 +3247,9 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 		vui_text_(vui_sib_id, string_in_out, strlen(string_in_out), 0.f, text_style);
 		VuiCtrl* text_ctrl = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 		ctrl = vui_ctrl_get(text_box_ctrl_id);
-		ctrl->scroll_content_id = text_ctrl->id;
+		if (!is_multiline) {
+			ctrl->scroll_content_id = text_ctrl->id;
+		}
 
 		//
 		// the control for the cursor
@@ -3105,20 +3259,24 @@ VuiBool vui_text_box_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_
 		vui_ctrl_end();
 	}
 
-	vui_ctrl_end();
+	if (is_multiline) {
+		vui_scroll_view_end();
+	} else {
+		vui_ctrl_end();
+	}
 	return has_changed;
 }
 
 VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	vui_assert(string_in_out, "a string buffer must be provided");
-	return vui_text_box_(sib_id, string_in_out, string_in_out_cap, styles, _VuiInputBoxType_text);
+	return _vui_text_box(sib_id, string_in_out, string_in_out_cap, styles, _VuiInputBoxType_text, vui_false, NULL, NULL, 0);
 }
 
 VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%u", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_u32);
+	VuiBool has_changed = _vui_text_box(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_u32, vui_false, NULL, NULL, 0);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -3132,7 +3290,7 @@ VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiTextBox
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%d", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_s32);
+	VuiBool has_changed = _vui_text_box(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_s32, vui_false, NULL, NULL, 0);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -3146,7 +3304,7 @@ VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxS
 	char* string = _vui.input.input_box.string;
 	snprintf(string, _vui_input_box_cap, "%f", *value);
 
-	VuiBool has_changed = vui_text_box_(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_float);
+	VuiBool has_changed = _vui_text_box(sib_id, string, _vui_input_box_cap, styles, _VuiInputBoxType_float, vui_false, NULL, NULL, 0);
 
 	VuiCtrl* text_box = vui_ctrl_get(_vui.build.sibling_prev_ctrl_id);
 	if (vui_ctrl_is_focused(text_box->id)) {
@@ -3154,6 +3312,11 @@ VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxS
 		*value = strtod(string, NULL);
 	}
 	return has_changed;
+}
+
+VuiBool vui_text_box_multiline_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]) {
+	vui_assert(string_in_out, "a string buffer must be provided");
+	return _vui_text_box(sib_id, string_in_out, string_in_out_cap, styles, _VuiInputBoxType_text, vui_true, content_offset_in_out, size_in_out, flags);
 }
 
 // ===========================================================================================
@@ -3229,7 +3392,9 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 	if (VuiRect_intersects_pt(&_vui.render.clip_rect, mouse_pt)) {
 		if (ctrl->flags & VuiCtrlFlags_focusable) {
 			_vui_ctrl_set_mouse_focused(ctrl->id);
-		} else if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
+		}
+
+		if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
 			_vui_ctrl_set_mouse_scroll_focused(ctrl->id);
 		}
 	}
@@ -3289,6 +3454,7 @@ void vui_frame_start(VuiBool right_to_left) {
 	if (_vui.input.focused_text_box.string) {
 		uint32_t str_len = strlen(_vui.input.focused_text_box.string);
 		VuiInputActions actions = _vui.input.actions;
+		uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx;
 		if (actions & VuiInputActions_left) {
 			if ((actions & VuiInputActions_select_word_start) == VuiInputActions_select_word_start) {
 			} else if ((actions & VuiInputActions_word_start) == VuiInputActions_word_start) {
@@ -3359,6 +3525,13 @@ void vui_frame_start(VuiBool right_to_left) {
 			}
 			_vui.input.focused_text_box.string_len =
 				_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
+		} else if (actions & VuiInputActions_enter) {
+			if (_vui.input.focused_text_box.is_multiline) {
+				if (_vui.input.focused_text_box.string_len + 1 < _vui.input.focused_text_box.string_cap) {
+					_vui_input_text_remove_selected();
+					_vui_input_text_insert("\n", 1);
+				}
+			}
 		} else if (actions & VuiInputActions_home) {
 			if ((actions & VuiInputActions_select_to_document_home) == VuiInputActions_select_to_document_home) {
 				_vui.input.focused_text_box.select_offset = -(int32_t)_vui.input.focused_text_box.cursor_idx;
@@ -3404,6 +3577,9 @@ void vui_frame_start(VuiBool right_to_left) {
 				_vui.input.focused_text_box.select_offset = 0;
 			}
 		}
+
+		_vui.input.focused_text_box.has_cursor_moved =
+			_vui.input.focused_text_box.has_cursor_moved || cursor_idx != _vui.input.focused_text_box.cursor_idx;
 	}
 
 	_vui.build.w = NULL;
@@ -3491,6 +3667,8 @@ void vui_frame_end() {
 	_vui.input.mouse.buttons_has_been_released = 0;
 	_vui.input.actions = 0;
 	_vui.input.focused_text_box.has_changed = vui_false;
+	_vui.input.focused_text_box.has_cursor_moved_last_frame = _vui.input.focused_text_box.has_cursor_moved;
+	_vui.input.focused_text_box.has_cursor_moved = vui_false;
 	_vui.build.frame_idx += 1;
 }
 

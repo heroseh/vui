@@ -1,5 +1,5 @@
 
-VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, VuiRenderGlyphFn render_glyph_fn) {
+VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, uint32_t cursor_num, VuiRenderGlyphFn render_glyph_fn) {
 	if (text_length == 0) { return VuiVec2_zero; }
 
 	//
@@ -75,6 +75,12 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 		// iterate over each glyph and maybe render the glyph if we are not scanning.
 		// if we are scanning, we check to see if this word does wrap to a new line.
 		while (1) {
+			if (!is_scanning_word_for_wrapping && cursor_num && i > cursor_num - 1) {
+				// move the position from the baseline to the top of the line.
+				pos.y -= ascent;
+				return pos;
+			}
+
 			if (codept < 32) { // is ASCII control key
 				if (codept == '\n') {
 					if (!is_scanning_word_for_wrapping) {
@@ -235,6 +241,12 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 			word_start_i = i;
 			word_end_i = i;
 		}
+	}
+
+	if (cursor_num) {
+		// move the position from the baseline to the top of the line.
+		pos.y -= ascent;
+		return pos;
 	}
 
 	max_pos.x = vui_max(max_pos.x, pos.x);

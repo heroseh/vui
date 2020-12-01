@@ -94,11 +94,7 @@ void build_ui() {
 	static VuiVec2 offset = {50.f, 50.f};
 	vui_scope_width(vui_fill_len)
 	vui_scope_height(vui_fill_len)
-	vui_scroll_view_start(vui_sib_id,
-		VuiScrollFlags_vertical |
-		VuiScrollFlags_resizable |
-		VuiScrollFlags_horizontal,
-		&vui_ss.scroll_view);
+	vui_scroll_view_start(vui_sib_id, VuiScrollFlags_vhr, &vui_ss.scroll_view);
 
 	vui_row_layout();
 	{
@@ -182,7 +178,7 @@ void build_ui() {
 
 			vui_scope_align(VuiAlign_left_center) {
 				vui_text(vui_sib_id, "Text:  ", 0.f, &vui_ss.text_menu);
-				static char buf[20] = {0};
+				static char buf[32] = {0};
 				vui_scope_width(200.f)
 				vui_text_box(vui_sib_id, buf, sizeof(buf), vui_ss.text_box);
 			}
@@ -235,6 +231,15 @@ void build_ui() {
 
 		vui_text(vui_sib_id, "This is an example of multi-line word-wrapping that has been...\nDesigned to be used as a test!!!\nDrag the slider to change the word_wrap_at_width value...\n\n...\n", word_wrap_at_width, &vui_ss.text_header);
 
+		vui_text(vui_sib_id, "Multiline Text Box", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
+
+		static char buf[1024] = {0};
+		vui_scope_width(200.f)
+		vui_text_box_multiline(vui_sib_id, buf, sizeof(buf), VuiScrollFlags_vhr, vui_ss.text_box);
+
+		vui_text(vui_sib_id, "Multiline Text Box", 0.f, &vui_ss.text_header);
+		vui_separator(vui_sib_id, &vui_ss.separator);
 	}
 	vui_scroll_view_end();
 
