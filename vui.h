@@ -106,7 +106,9 @@ static inline void* vui_ptr_round_down_align(void* ptr, uintptr_t align) {
 #define _vui_defer_loop(start_expr, end_expr) for (int _i_ = (start_expr, 0); _i_ < 1; _i_ += 1, end_expr)
 
 uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint);
-VuiBool vui_is_word_delimiter(int32_t codept);
+VuiBool vui_utf8_is_codepoint_boundary(char ch);
+VuiBool vui_utf8_is_word_delimiter(int32_t codept);
+VuiBool vui_utf8_is_whitespace(int32_t codept);
 
 // ===========================================================================================
 //
@@ -630,6 +632,7 @@ enum {
 	VuiCtrlFlags_pressable = 0x100,
 	VuiCtrlFlags_toggleable = 0x200,
 	VuiCtrlFlags_selectable = 0x400,
+	VuiCtrlFlags_focusable_scroll = 0x800,
 	_VuiCtrlFlags_show_vertical_bar = 0x2000,
 	_VuiCtrlFlags_show_horizontal_bar = 0x4000,
 };

@@ -53,7 +53,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 			while (1) {
 				int32_t next_codept = 0;
 				uint32_t codept_size = vui_utf8_codepoint(&text[i], &next_codept);
-				VuiBool found = vui_is_word_delimiter(next_codept);
+				VuiBool found = vui_utf8_is_word_delimiter(next_codept);
 				if (!found) { if (found_delimiter) break; }
 				else found_delimiter = vui_true;
 				i += codept_size;
@@ -164,7 +164,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 				// that directly follow this word.
 				uint32_t codept_size = 0;
 				while (1) {
-					VuiBool found = vui_is_word_delimiter(codept);
+					VuiBool found = vui_utf8_is_word_delimiter(codept);
 					if (!found) { if (found_delimiter) break; }
 					else found_delimiter = vui_true;
 					i += codept_size;
@@ -182,7 +182,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 			//
 			// if we are scanning see if the codepoint we just positioned is a delimiter.
 			if (is_scanning_word_for_wrapping) {
-				found_delimiter = vui_is_word_delimiter(codept);
+				found_delimiter = vui_utf8_is_word_delimiter(codept);
 			}
 
 			//
@@ -194,7 +194,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 
 			//
 			// if we are scanning and the next codepoint is not a delimiter then this is the end of scan.
-			if (is_scanning_word_for_wrapping && found_delimiter && !vui_is_word_delimiter(next_codept)) {
+			if (is_scanning_word_for_wrapping && found_delimiter && !vui_utf8_is_word_delimiter(next_codept)) {
 				break;
 			}
 

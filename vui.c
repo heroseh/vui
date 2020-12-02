@@ -191,6 +191,7 @@ typedef struct {
 			uint32_t string_len;
 			uint32_t string_cap;
 			uint32_t cursor_idx;
+			uint32_t cursor_max_last_unchanged_column_idx;
 			// signed offset from the cursor_idx.
 			// cursor_idx to cursor_idx + select_offset
 			// will be the selection range.
@@ -597,8 +598,12 @@ uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint) {
 	return bytes;
 }
 
+VuiBool vui_utf8_is_codepoint_boundary(char ch) {
+	// this is bit magic equivalent to: b < 128 || b >= 192
+	return ch >= -0x40;
+}
 
-VuiBool vui_is_word_delimiter(int32_t codept) {
+VuiBool vui_utf8_is_word_delimiter(int32_t codept) {
 	// all of the control characters are delimiters
 	if (codept < 32) return vui_true;
 
@@ -609,6 +614,18 @@ VuiBool vui_is_word_delimiter(int32_t codept) {
 	while (delimiter_i < sizeof(word_delimiters)) {
 		delimiter_i += vui_utf8_codepoint(&word_delimiters[delimiter_i], &delimiter);
 		if (delimiter == codept) return vui_true;
+	}
+	return vui_false;
+}
+
+VuiBool vui_utf8_is_whitespace(int32_t codept) {
+	char ws_codepts[] = " \t";
+
+	int32_t ws = 0;
+	uint32_t ws_i = 0;
+	while (ws_i < sizeof(ws_codepts)) {
+		ws_i += vui_utf8_codepoint(&ws_codepts[ws_i], &ws);
+		if (ws == codept) return vui_true;
 	}
 	return vui_false;
 }
@@ -2842,7 +2859,7 @@ void VuiCtrl_set_scroll_offset(VuiCtrl* ctrl, VuiVec2 offset, VuiBool holding_sc
 }
 
 void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiScrollViewStyle* style) {
-	vui_ctrl_start_(sib_id, flags, 0, &style->ctrl, VuiScrollViewStyle_interp, NULL);
+	vui_ctrl_start_(sib_id, flags | VuiCtrlFlags_focusable_scroll, 0, &style->ctrl, VuiScrollViewStyle_interp, NULL);
 	VuiCtrlId scroll_view_ctrl_id = _vui.build.parent_ctrl_id;
 	VuiCtrl* ctrl = vui_ctrl_get(scroll_view_ctrl_id);
 
@@ -3394,7 +3411,7 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 			_vui_ctrl_set_mouse_focused(ctrl->id);
 		}
 
-		if (ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
+		if (ctrl->flags & VuiCtrlFlags_focusable_scroll && ctrl->flags & (VuiCtrlFlags_scrollable_vertical | VuiCtrlFlags_scrollable_horizontal)) {
 			_vui_ctrl_set_mouse_scroll_focused(ctrl->id);
 		}
 	}
@@ -3406,6 +3423,278 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 	}
 
 	_vui.render.clip_rect = parent_clip_rect;
+}
+
+//
+// unselects the text and moves the cursor to the furthest left selection
+//
+void _vui_text_nav_select_collapse_left() {
+	uint32_t idx = _vui.input.focused_text_box.cursor_idx;
+	uint32_t select_end_idx = idx + _vui.input.focused_text_box.select_offset;
+	if (select_end_idx < idx) {
+		_vui.input.focused_text_box.cursor_idx = select_end_idx;
+	}
+	_vui.input.focused_text_box.select_offset = 0;
+}
+
+//
+// unselects the text and moves the cursor to the furthest right selection
+//
+void _vui_text_nav_select_collapse_right() {
+	uint32_t idx = _vui.input.focused_text_box.cursor_idx;
+	uint32_t select_end_idx = idx + _vui.input.focused_text_box.select_offset;
+	if (select_end_idx > idx) {
+		_vui.input.focused_text_box.cursor_idx = select_end_idx;
+	}
+	_vui.input.focused_text_box.select_offset = 0;
+}
+
+uint32_t _vui_text_nav_word_start(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	if (idx == 0) return 0;
+
+	int32_t codept = 0;
+
+	//
+	// navigate to the previous non-whitespace codepoint to see if we start on a word delimiter or not.
+	idx -= 1;
+	while (idx) {
+		if (vui_utf8_is_codepoint_boundary(string[idx])) {
+			vui_utf8_codepoint(&string[idx], &codept);
+			if (!vui_utf8_is_whitespace(codept)) {
+				break;
+			}
+		}
+		idx -= 1;
+	}
+
+	if (idx == 0) return idx;
+
+	//
+	// get the codepoint and check for a word delimiter
+	vui_utf8_codepoint(&string[idx], &codept);
+	VuiBool is_on_delimiter = vui_utf8_is_word_delimiter(codept);
+
+	//
+	// navigate backwards by each codepoint.
+	// when we reach a non-whitespace codepoint that is the opposite of is_on_delimiter,
+	// then move forward by one codepoint to be back on the last codepoint that matched
+	while (idx) {
+		idx -= 1;
+		while (idx && !vui_utf8_is_codepoint_boundary(string[idx])) {
+			idx -= 1;
+		}
+		uint32_t codept_size = vui_utf8_codepoint(&string[idx], &codept);
+		if (vui_utf8_is_whitespace(codept) || vui_utf8_is_word_delimiter(codept) != is_on_delimiter) {
+			idx += codept_size;
+			break;
+		}
+	}
+
+	return idx;
+}
+
+uint32_t _vui_text_nav_word_end(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	uint32_t string_len = _vui.input.focused_text_box.string_len;
+	if (idx == string_len) return idx;
+
+	int32_t codept = 0;
+
+	//
+	// if we don't have already, navigate forward until we have a non-whitespace codepoint.
+	while (idx < string_len) {
+		uint32_t codept_size = vui_utf8_codepoint(&string[idx], &codept);
+		if (!vui_utf8_is_whitespace(codept)) {
+			break;
+		}
+		idx += codept_size;
+	}
+
+	if (idx == string_len) return idx;
+
+	//
+	// get the codepoint and see if we start on a word delimiter
+	vui_utf8_codepoint(&string[idx], &codept);
+	VuiBool is_on_delimiter = vui_utf8_is_word_delimiter(codept);
+
+	//
+	// navigate forwards by each codepoint.
+	// when we reach a codepoint that is the opposite of is_on_delimiter.
+	while (idx < string_len) {
+		uint32_t codept_size = vui_utf8_codepoint(&string[idx], &codept);
+		if (vui_utf8_is_whitespace(codept) || vui_utf8_is_word_delimiter(codept) != is_on_delimiter) {
+			break;
+		}
+		idx += codept_size;
+	}
+
+	return idx;
+}
+
+uint32_t _vui_text_nav_home(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	if (idx == 0) return 0;
+
+	//
+	// move backwards until a newline character comes before the index.
+	idx -= 1;
+	while (idx) {
+		if (vui_utf8_is_codepoint_boundary(string[idx])) {
+			char ch = string[idx];
+			if (ch == '\n') {
+				idx += 1;
+				break;
+			}
+		}
+		idx -= 1;
+	}
+
+	return idx;
+}
+
+uint32_t _vui_text_nav_end(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	uint32_t string_len = _vui.input.focused_text_box.string_len;
+	if (idx == string_len) return idx;
+
+
+	//
+	// move forwards we are on a newline character.
+	while (idx < string_len) {
+		if (vui_utf8_is_codepoint_boundary(string[idx])) {
+			char ch = string[idx];
+			if (ch == '\r' || ch == '\n')
+				break;
+		}
+		idx += 1;
+	}
+
+	return idx;
+}
+
+uint32_t _vui_text_column_idx(uint32_t idx, uint32_t* column_idx_out) {
+	char* string = _vui.input.focused_text_box.string;
+	uint32_t column_idx = 0;
+	if (idx == 0) {
+		*column_idx_out = 0;
+		return 0;
+	}
+
+	//
+	// TODO: this will not word for multi codepoint characters.
+	// move backwards and count how many codepoints we are from the start of the line.
+	idx -= 1;
+	while (idx) {
+		if (vui_utf8_is_codepoint_boundary(string[idx])) {
+			char ch = string[idx];
+			if (ch == '\n') {
+				break;
+			}
+			column_idx += 1;
+		}
+		idx -= 1;
+	}
+
+	if (idx == 0) { // add 1 here when the first character has not been processed in the previous loop
+		column_idx += 1;
+	}
+
+	*column_idx_out = column_idx;
+	return idx;
+}
+
+uint32_t _vui_text_nav_up(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	uint32_t start_idx = idx;
+	if (idx == 0) return 0;
+
+	uint32_t column_idx = 0;
+	idx = _vui_text_column_idx(idx, &column_idx);
+	// move off the new line if we have \r\n encoding
+	if (idx && string[idx - 1] == '\r') {
+		idx -= 1;
+	}
+
+
+	//
+	// store this column index if this is the first up or down key to be press.
+	// if not restore the column index if we have not press another key over than up or down
+	// and the value stored is bigger than our current column index.
+	if (_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx == 0) {
+		_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = column_idx;
+	} else if (_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx > column_idx) {
+		column_idx = _vui.input.focused_text_box.cursor_max_last_unchanged_column_idx;
+	}
+
+	if (idx == 0) return start_idx;
+
+	//
+	// go to the start of the previous line
+	idx = _vui_text_nav_home(idx);
+
+	//
+	// now move forwards until we reach the same column we where in on the other line.
+	for (uint32_t i = 0; i < column_idx; i += 1) {
+		int32_t codept = 0;
+		uint32_t codept_size =  vui_utf8_codepoint(&string[idx], &codept);
+		if (codept == '\n' || codept == '\r') {
+			// stop if we reach a newline
+			break;
+		}
+		idx += codept_size;
+	}
+
+	return idx;
+}
+
+uint32_t _vui_text_nav_down(uint32_t idx) {
+	char* string = _vui.input.focused_text_box.string;
+	uint32_t string_len = _vui.input.focused_text_box.string_len;
+	uint32_t start_idx = idx;
+	if (idx == string_len) return idx;
+
+	uint32_t column_idx = 0;
+	idx = _vui_text_column_idx(idx, &column_idx);
+	if (idx) {
+		// move off the new line
+		idx += 1;
+	}
+
+	//
+	// store this column index if this is the first up or down key to be press.
+	// if not restore the column index if we have not press another key over than up or down
+	// and the value stored is bigger than our current column index.
+	if (_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx == 0) {
+		_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = column_idx;
+	} else if (_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx > column_idx) {
+		column_idx = _vui.input.focused_text_box.cursor_max_last_unchanged_column_idx;
+	}
+
+	//
+	// go to the start of the next line
+	idx = _vui_text_nav_end(idx);
+	if (idx == string_len) return start_idx;
+	if (string[idx] == '\r') { // handle windows \r\n
+		idx += 2;
+	} else {
+		idx += 1;
+	}
+
+	//
+	// now move forwards until we reach the same column we where in on the other line.
+	for (uint32_t i = 0; i < column_idx; i += 1) {
+		if (idx >= string_len) break;
+		int32_t codept = 0;
+		uint32_t codept_size =  vui_utf8_codepoint(&string[idx], &codept);
+		if (codept == '\n' || codept == '\r') {
+			// stop if we reach a newline
+			break;
+		}
+		idx += codept_size;
+	}
+
+	return idx;
 }
 
 void vui_frame_start(VuiBool right_to_left) {
@@ -3456,13 +3745,22 @@ void vui_frame_start(VuiBool right_to_left) {
 		VuiInputActions actions = _vui.input.actions;
 		uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx;
 		if (actions & VuiInputActions_left) {
+
 			if ((actions & VuiInputActions_select_word_start) == VuiInputActions_select_word_start) {
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_word_start(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
 			} else if ((actions & VuiInputActions_word_start) == VuiInputActions_word_start) {
+				_vui_text_nav_select_collapse_left();
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_word_start(_vui.input.focused_text_box.cursor_idx);
+
 			} else if ((actions & VuiInputActions_select_left) == VuiInputActions_select_left) {
 				if (_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset) {
 					_vui.input.focused_text_box.select_offset -= 1;
 				}
-			} else {
+
+			} else { // left key with no modifiers
 				if (_vui.input.focused_text_box.cursor_idx) {
 					if (_vui.input.focused_text_box.select_offset < 0) {
 						_vui.input.focused_text_box.cursor_idx += _vui.input.focused_text_box.select_offset;
@@ -3472,15 +3770,25 @@ void vui_frame_start(VuiBool right_to_left) {
 				}
 				_vui.input.focused_text_box.select_offset = 0;
 			}
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
 		} else if (actions & VuiInputActions_right) {
+
 			if ((actions & VuiInputActions_select_word_end) == VuiInputActions_select_word_end) {
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_word_end(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
 			} else if ((actions & VuiInputActions_word_end) == VuiInputActions_word_end) {
+				_vui_text_nav_select_collapse_right();
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_word_end(_vui.input.focused_text_box.cursor_idx);
+
 			} else if ((actions & VuiInputActions_select_right) == VuiInputActions_select_right) {
 				if (_vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset < str_len) {
 					_vui.input.focused_text_box.select_offset += 1;
 				}
 
-			} else {
+			} else { // right key with no modifiers
 				uint32_t end_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
 				if (end_idx <= str_len && _vui.input.focused_text_box.select_offset > 0) {
 					_vui.input.focused_text_box.cursor_idx += _vui.input.focused_text_box.select_offset;
@@ -3490,7 +3798,36 @@ void vui_frame_start(VuiBool right_to_left) {
 
 				_vui.input.focused_text_box.select_offset = 0;
 			}
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
+		} else if (actions & VuiInputActions_up) {
+
+			if ((actions & VuiInputActions_select_up) == VuiInputActions_select_up) {
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_up(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
+			} else { // up key with no modifiers
+				_vui_text_nav_select_collapse_left();
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_up(_vui.input.focused_text_box.cursor_idx);
+			}
+
+		} else if (actions & VuiInputActions_down) {
+
+			if ((actions & VuiInputActions_select_down) == VuiInputActions_select_down) {
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_down(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
+			} else { // down key with no modifiers
+				_vui_text_nav_select_collapse_right();
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_down(_vui.input.focused_text_box.cursor_idx);
+			}
+
 		} else if (actions & (VuiInputActions_backspace | VuiInputActions_delete)) {
+
+			//
+			// get the start and end index of the selection if there is one.
 			uint32_t start_idx = 0;
 			uint32_t end_idx = 0;
 			if (_vui.input.focused_text_box.select_offset > 0) {
@@ -3502,19 +3839,23 @@ void vui_frame_start(VuiBool right_to_left) {
 			}
 
 			if ((actions & VuiInputActions_delete) == VuiInputActions_delete) {
+
 				if ((actions & VuiInputActions_delete_to_end_of_word) == VuiInputActions_delete_to_end_of_word) {
-					end_idx = str_len;
+					end_idx = _vui_text_nav_word_end(end_idx);
 				} else if (_vui.input.focused_text_box.select_offset == 0 && end_idx < str_len) {
 					// nothing is selected so add one.
 					end_idx += 1;
 				}
+
 			} else {
+
 				if ((actions & VuiInputActions_delete_to_start_of_word) == VuiInputActions_delete_to_start_of_word) {
-					start_idx = 0;
+					start_idx = _vui_text_nav_word_start(start_idx);
 				} else if (_vui.input.focused_text_box.select_offset == 0 && start_idx > 0) {
 					// nothing is selected so add one.
 					start_idx -= 1;
 				}
+
 			}
 
 			_vui.input.focused_text_box.cursor_idx = start_idx;
@@ -3523,59 +3864,62 @@ void vui_frame_start(VuiBool right_to_left) {
 			if (start_idx != end_idx) {
 				_vui.input.focused_text_box.has_changed = vui_true;
 			}
+
 			_vui.input.focused_text_box.string_len =
 				_vui_string_remove_range_shift(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, start_idx, end_idx);
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
 		} else if (actions & VuiInputActions_enter) {
+
 			if (_vui.input.focused_text_box.is_multiline) {
 				if (_vui.input.focused_text_box.string_len + 1 < _vui.input.focused_text_box.string_cap) {
 					_vui_input_text_remove_selected();
 					_vui_input_text_insert("\n", 1);
 				}
 			}
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
 		} else if (actions & VuiInputActions_home) {
+
 			if ((actions & VuiInputActions_select_to_document_home) == VuiInputActions_select_to_document_home) {
 				_vui.input.focused_text_box.select_offset = -(int32_t)_vui.input.focused_text_box.cursor_idx;
+
 			} else if ((actions & VuiInputActions_document_home) == VuiInputActions_document_home) {
 				_vui.input.focused_text_box.cursor_idx = 0;
 				_vui.input.focused_text_box.select_offset = 0;
+
 			} else if ((actions & VuiInputActions_select_home) == VuiInputActions_select_home) {
-				uint32_t idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
-				while (idx) {
-					char c = _vui.input.focused_text_box.string[idx - 1];
-					if (c == '\n' || c == '\r') break;
-					idx -= 1;
-				}
-				_vui.input.focused_text_box.select_offset = idx - _vui.input.focused_text_box.cursor_idx;
-			} else {
-				while (_vui.input.focused_text_box.cursor_idx) {
-					char c = _vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx - 1];
-					if (c == '\n' || c == '\r') break;
-					_vui.input.focused_text_box.cursor_idx -= 1;
-				}
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_home(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
+			} else { // home key no modifiers
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_home(_vui.input.focused_text_box.cursor_idx);
 				_vui.input.focused_text_box.select_offset = 0;
 			}
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
 		} else if (actions & VuiInputActions_end) {
+
 			if ((actions & VuiInputActions_select_to_document_end) == VuiInputActions_select_to_document_end) {
 				_vui.input.focused_text_box.select_offset = str_len - _vui.input.focused_text_box.cursor_idx;
+
 			} else if ((actions & VuiInputActions_document_end) == VuiInputActions_document_end) {
 				_vui.input.focused_text_box.cursor_idx = str_len;
 				_vui.input.focused_text_box.select_offset = 0;
+
 			} else if ((actions & VuiInputActions_select_end) == VuiInputActions_select_end) {
-				uint32_t idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
-				while (idx < str_len) {
-					char c = _vui.input.focused_text_box.string[idx];
-					if (c == '\n' || c == '\r') break;
-					idx += 1;
-				}
-				_vui.input.focused_text_box.select_offset = idx - _vui.input.focused_text_box.cursor_idx;
+				uint32_t start_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
+				uint32_t idx = _vui_text_nav_end(start_idx);
+				_vui.input.focused_text_box.select_offset += idx - start_idx;
+
 			} else {
-				while (_vui.input.focused_text_box.cursor_idx < str_len) {
-					char c = _vui.input.focused_text_box.string[_vui.input.focused_text_box.cursor_idx];
-					if (c == '\n' || c == '\r') break;
-					_vui.input.focused_text_box.cursor_idx += 1;
-				}
+				_vui.input.focused_text_box.cursor_idx = _vui_text_nav_end(_vui.input.focused_text_box.cursor_idx);
 				_vui.input.focused_text_box.select_offset = 0;
+
 			}
+
+			_vui.input.focused_text_box.cursor_max_last_unchanged_column_idx = 0;
 		}
 
 		_vui.input.focused_text_box.has_cursor_moved =
