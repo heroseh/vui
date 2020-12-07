@@ -1,24 +1,24 @@
 
-VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, uint32_t cursor_num, VuiRenderGlyphFn render_glyph_fn) {
-	if (text_length == 0) { return VuiVec2_zero; }
+VuiPositionTextRet vui_stbtt_position_text(VuiPositionTextArgs* args) {
+	if (args->text_length == 0) { return (VuiPositionTextRet){ .vec2 = VuiVec2_zero }; }
 
 	//
 	// get the font info, vertical metrics and the scale for the line height.
 	//
 
-	stbtt_fontinfo* info = vui_stbtt_get_info(font_id);
+	stbtt_fontinfo* info = vui_stbtt_get_info(args->font_id);
 	int ascent, descent, line_gap;
 	stbtt_GetFontVMetrics(info, &ascent, &descent, &line_gap);
 
-	float scale = stbtt_ScaleForPixelHeight(info, line_height);
+	float scale = stbtt_ScaleForPixelHeight(info, args->line_height);
 	ascent = roundf(ascent * scale);
 	descent = roundf(descent * scale);
 
 	//
 	// move the position down to the baseline
-	VuiVec2 pos = top_left;
+	VuiVec2 pos = args->top_left;
 	pos.y += ascent;
-	float line_start_x = top_left.x;
+	float line_start_x = args->top_left.x;
 
 	VuiVec2 max_pos = {0};
 
@@ -31,7 +31,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 	uint32_t word_start_codept = 0;
 	uint32_t word_start_glyph = 0;
 	// disable the first scan ahead phase if word wrapping is disabled (word_wrap_at_width == 0.f)
-	uint32_t word_end_i = word_wrap_at_width == 0.f ? text_length : i;
+	uint32_t word_end_i = args->word_wrap_at_width == 0.f ? args->text_length : i;
 	//
 	// if word_wrap_at_width is enabled (> 0.f), then this loop works in two phases.
 	// one iteration is to see if a word will go past the wrap wrapping boundary.
@@ -41,7 +41,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 	//
 	// if word wrapping is disabled, then the whole text is just positioned in a single loop.
 	//
-	while (i < text_length) {
+	while (i < args->text_length) {
 		VuiBool found_delimiter = vui_false;
 		//
 		// if we are scanning ahead this iteration and this is the first word on the line.
@@ -52,7 +52,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 		if (is_scanning_word_for_wrapping && !is_not_first_word_on_line) {
 			while (1) {
 				int32_t next_codept = 0;
-				uint32_t codept_size = vui_utf8_codepoint(&text[i], &next_codept);
+				uint32_t codept_size = vui_utf8_codepoint(&args->text[i], &next_codept);
 				VuiBool found = vui_utf8_is_word_delimiter(next_codept);
 				if (!found) { if (found_delimiter) break; }
 				else found_delimiter = vui_true;
@@ -64,7 +64,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 			continue;
 		}
 
-		i += vui_utf8_codepoint(&text[i], &codept);
+		i += vui_utf8_codepoint(&args->text[i], &codept);
 		codept_glyph = stbtt_FindGlyphIndex(info, codept);
 		if (is_scanning_word_for_wrapping) {
 			word_start_codept = codept;
@@ -75,10 +75,39 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 		// iterate over each glyph and maybe render the glyph if we are not scanning.
 		// if we are scanning, we check to see if this word does wrap to a new line.
 		while (1) {
-			if (!is_scanning_word_for_wrapping && cursor_num && i > cursor_num - 1) {
-				// move the position from the baseline to the top of the line.
-				pos.y -= ascent;
-				return pos;
+			int advance_width;
+			int left_side_bearing;
+			stbtt_GetGlyphHMetrics(info, codept_glyph, &advance_width, &left_side_bearing);
+			float advance_width_f = advance_width * scale;
+
+			if (!is_scanning_word_for_wrapping) {
+				if (args->cursor_num) {
+					if (i > args->cursor_num - 1) {
+						// move the position from the baseline to the top of the line.
+						pos.y -= ascent;
+						return (VuiPositionTextRet){ .vec2 = pos };
+					}
+				} else if (args->cursor_pos.x || args->cursor_pos.y) {
+					if (pos.x + advance_width_f > args->cursor_pos.x && pos.y - descent + line_gap > args->cursor_pos.y) {
+						//
+						// move back a character if the cursor is in the first half of this glyph
+						if ((pos.x + advance_width_f * 0.5f) > args->cursor_pos.x) {
+RETURN_CURSOR_IDX_GO_BACK:
+							i = vui_utf8_prev_char(args->text, i);
+						}
+						if (i > args->text_length) {
+							i = args->text_length;
+						}
+						return (VuiPositionTextRet){ .u32 = i };
+					} else if (pos.y - descent + line_gap > args->cursor_pos.y + args->line_height) {
+						//
+						// we have definately passed the line we where looking for.
+						// so go back to the last character of the line and return.
+						//
+						i = vui_utf8_prev_char(args->text, i);
+						goto RETURN_CURSOR_IDX_GO_BACK;
+					}
+				}
 			}
 
 			if (codept < 32) { // is ASCII control key
@@ -88,7 +117,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 						// got a newline so advance to the next line.
 						if (pos.x > max_pos.x)
 							max_pos.x = pos.x;
-						pos.y += line_height;
+						pos.y += args->line_height;
 						pos.x = line_start_x;
 					}
 
@@ -108,7 +137,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 					pos.x += advance_width * scale;
 				}
 
-				i += vui_utf8_codepoint(&text[i], &codept);
+				i += vui_utf8_codepoint(&args->text[i], &codept);
 				codept_glyph = stbtt_FindGlyphIndex(info, codept);
 
 				//
@@ -117,36 +146,33 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 				continue;
 			} else {
 				if (!is_scanning_word_for_wrapping) {
-					if (render_glyph_fn) {
+					if (args->render_glyph_fn) {
 						//
 						// we have a render function, so it's time to render our glyph by calling back to VUI.
-						vui_stbtt_render_glyph(pos, font_id, line_height, codept, codept_glyph, vui_true, render_glyph_fn);
+						vui_stbtt_render_glyph(pos, args->font_id, args->line_height, codept, codept_glyph, vui_true, args->render_glyph_fn);
 					} else {
 						//
 						// call this user implemented function to keep track of what styled glyphs we have.
 						// so we can ensure they exist in a glyph texture somewhere.
-						vui_stbtt_found_glyph(font_id, line_height, codept, codept_glyph);
+						vui_stbtt_found_glyph(args->font_id, args->line_height, codept, codept_glyph);
 					}
 				}
 			}
 
 			//
 			// advance the position by the advance width of this glyph.
-			int advance_width;
-			int left_side_bearing;
-			stbtt_GetGlyphHMetrics(info, codept_glyph, &advance_width, &left_side_bearing);
-			pos.x += advance_width * scale;
+			pos.x += advance_width_f;
 
 			//
 			// stop if we have just finished positioning the last codepoint/glyph in the text.
-			if (i >= text_length) break;
+			if (i >= args->text_length) break;
 
 			//
 			// if we are scanning try and see if we wrap.
 			if (
 				is_scanning_word_for_wrapping &&
 				is_not_first_word_on_line &&
-				pos.x - line_start_x > word_wrap_at_width
+				pos.x - line_start_x > args->word_wrap_at_width
 			) {
 				//
 				// we wrap on this word, so advance the position to the next line
@@ -156,7 +182,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 				if (pos.x > max_pos.x)
 					max_pos.x = pos.x;
 
-				pos.y += line_height;
+				pos.y += args->line_height;
 				pos.x = line_start_x;
 
 				//
@@ -168,13 +194,13 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 					if (!found) { if (found_delimiter) break; }
 					else found_delimiter = vui_true;
 					i += codept_size;
-					codept_size = vui_utf8_codepoint(&text[i], &codept);
+					codept_size = vui_utf8_codepoint(&args->text[i], &codept);
 				}
 
 				//
 				// delimiters processed by themselves will need to be manually advanced here
 				if (i == word_start_i) {
-					i += vui_utf8_codepoint(&text[i], &codept);
+					i += vui_utf8_codepoint(&args->text[i], &codept);
 				}
 				break;
 			}
@@ -190,7 +216,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 			//
 
 			int32_t next_codept = 0;
-			uint32_t codept_size = vui_utf8_codepoint(&text[i], &next_codept);
+			uint32_t codept_size = vui_utf8_codepoint(&args->text[i], &next_codept);
 
 			//
 			// if we are scanning and the next codepoint is not a delimiter then this is the end of scan.
@@ -233,7 +259,7 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 				pos = word_start_pos;
 			}
 			is_not_first_word_on_line = vui_true;
-		} else if (word_wrap_at_width > 0.f) {
+		} else if (args->word_wrap_at_width > 0.f) {
 			//
 			// we just finished positioning a word, so store where the next word starts from.
 			//
@@ -243,14 +269,17 @@ VuiVec2 vui_stbtt_position_text(void* userdata, VuiFontId font_id, float line_he
 		}
 	}
 
-	if (cursor_num) {
+	if (args->cursor_num) {
 		// move the position from the baseline to the top of the line.
 		pos.y -= ascent;
-		return pos;
+		return (VuiPositionTextRet){ .vec2 = pos };
+	} else if (args->cursor_pos.x || args->cursor_pos.y) {
+		return (VuiPositionTextRet){ .u32 = args->text_length };
 	}
+
 
 	max_pos.x = vui_max(max_pos.x, pos.x);
 	max_pos.y = pos.y - descent;
-	return max_pos;
+	return (VuiPositionTextRet){ .vec2 = max_pos };
 }
 

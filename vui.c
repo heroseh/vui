@@ -598,6 +598,19 @@ uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint) {
 	return bytes;
 }
 
+uint32_t vui_utf8_prev_char(const char* str, uint32_t idx) {
+	while (idx--) {
+		if (vui_utf8_is_codepoint_boundary(str[idx])) {
+			break;
+		}
+	}
+
+	if (idx == UINT32_MAX)
+		idx = 0;
+
+	return idx;
+}
+
 VuiBool vui_utf8_is_codepoint_boundary(char ch) {
 	// this is bit magic equivalent to: b < 128 || b >= 192
 	return ch >= -0x40;
@@ -832,7 +845,8 @@ static void _vui_input_text_insert(const char* string, uint32_t string_length) {
 	//
 	// if the string will exceed the capacity then reduce the string length to allow for a null terminator at the end.
 	if (dst_idx_end >= _vui.input.focused_text_box.string_cap) {
-		string_length -= (dst_idx_end - _vui.input.focused_text_box.string_cap) + 1;
+		uint32_t amount = (dst_idx_end - _vui.input.focused_text_box.string_cap) + 1;
+		string_length -= string_length < amount ? string_length : amount;
 		dst_idx_end = dst_idx + string_length;
 	}
 
@@ -987,26 +1001,28 @@ void _vui_ctrl_set_mouse_scroll_focused(VuiCtrlId ctrl_id) {
 	_vui.mouse_scroll_focused_ctrl_id = ctrl_id;
 }
 
-VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id) {
+VuiFocusState _vui_ctrl_focus_state(VuiCtrlId ctrl_id, VuiBool disable_keyboard_actions) {
 	//
 	// keyboard state
 	//
 
-	if ((_vui.input.actions & VuiInputActions_focus_pressed) == VuiInputActions_focus_pressed) {
-		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_pressed | VuiFocusState_held | VuiFocusState_focused;
+	if (!disable_keyboard_actions) {
+		if ((_vui.input.actions & VuiInputActions_focus_pressed) == VuiInputActions_focus_pressed) {
+			if (vui_ctrl_is_focused(ctrl_id)) {
+				return VuiFocusState_pressed | VuiFocusState_held | VuiFocusState_focused;
+			}
 		}
-	}
 
-	if ((_vui.input.actions & VuiInputActions_focus_held) == VuiInputActions_focus_held) {
-		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_held | VuiFocusState_focused;
+		if ((_vui.input.actions & VuiInputActions_focus_held) == VuiInputActions_focus_held) {
+			if (vui_ctrl_is_focused(ctrl_id)) {
+				return VuiFocusState_held | VuiFocusState_focused;
+			}
 		}
-	}
 
-	if ((_vui.input.actions & VuiInputActions_focus_released) == VuiInputActions_focus_released) {
-		if (vui_ctrl_is_focused(ctrl_id)) {
-			return VuiFocusState_released | VuiFocusState_focused;
+		if ((_vui.input.actions & VuiInputActions_focus_released) == VuiInputActions_focus_released) {
+			if (vui_ctrl_is_focused(ctrl_id)) {
+				return VuiFocusState_released | VuiFocusState_focused;
+			}
 		}
 	}
 
@@ -1556,7 +1572,16 @@ void _vui_render_glyph(const VuiRect* rect, VuiTextureId glyph_texture_id, const
 void vui_render_text(VuiVec2 left_top, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width) {
 	if (text_length) {
 		_vui_render_glyph_color = color;
-		_vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, left_top, 0, _vui_render_glyph);
+		VuiPositionTextArgs args = {0};
+		args.userdata = _vui.position_text_userdata;
+		args.font_id = font_id;
+		args.line_height = line_height;
+		args.text = text;
+		args.text_length = text_length;
+		args.word_wrap_at_width = word_wrap_at_width;
+		args.top_left = left_top;
+		args.render_glyph_fn = _vui_render_glyph;
+		_vui.position_text_fn(&args);
 	}
 }
 
@@ -2054,11 +2079,39 @@ void VuiProgressBar_render(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* co
 }
 
 static VuiVec2 vui_get_text_size(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, 0, NULL);
+	VuiPositionTextArgs args = {0};
+	args.userdata = _vui.position_text_userdata;
+	args.font_id = font_id;
+	args.line_height = line_height;
+	args.text = text;
+	args.text_length = text_length;
+	args.word_wrap_at_width = word_wrap_at_width;
+	return _vui.position_text_fn(&args).vec2;
 }
 
 static VuiVec2 vui_get_text_cursor_pos(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height, uint32_t cursor_idx) {
-	return _vui.position_text_fn(_vui.position_text_userdata, font_id, line_height, text, text_length, word_wrap_at_width, VuiVec2_zero, cursor_idx + 1, NULL);
+	VuiPositionTextArgs args = {0};
+	args.userdata = _vui.position_text_userdata;
+	args.font_id = font_id;
+	args.line_height = line_height;
+	args.text = text;
+	args.text_length = text_length;
+	args.word_wrap_at_width = word_wrap_at_width;
+	args.cursor_num = cursor_idx + 1;
+	return _vui.position_text_fn(&args).vec2;
+}
+
+static uint32_t vui_get_text_cursor_idx(char* text, uint32_t text_length, float word_wrap_at_width, VuiFontId font_id, float line_height, VuiVec2 left_top, VuiVec2 cursor_pos) {
+	VuiPositionTextArgs args = {0};
+	args.userdata = _vui.position_text_userdata;
+	args.font_id = font_id;
+	args.line_height = line_height;
+	args.text = text;
+	args.text_length = text_length;
+	args.word_wrap_at_width = word_wrap_at_width;
+	args.top_left = left_top;
+	args.cursor_pos = cursor_pos;
+	return _vui.position_text_fn(&args).u32;
 }
 
 void VuiTextBoxCursor_render(VuiCtrl* ctrl, const VuiCtrlStyle* _style, VuiRect* content_rect) {
@@ -2204,7 +2257,7 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 	}
 
 	if (flags & VuiCtrlFlags_focusable) {
-		VuiFocusState focus_state = _vui_ctrl_focus_state(ctrl->id);
+		VuiFocusState focus_state = _vui_ctrl_focus_state(ctrl->id, !!(flags & VuiCtrlFlags_focusable_no_keyboard_actions));
 		ctrl->focus_state = focus_state;
 
 		//
@@ -3132,7 +3185,9 @@ void vui_scroll_view_end() {
 static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT], _VuiInputBoxType type, VuiBool is_multiline, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags) {
 	vui_scope_height(vui_auto_len) {
 		if (is_multiline) {
-			vui_scroll_view_start_(sib_id, content_offset_in_out, size_in_out, flags | VuiCtrlFlags_focusable, &styles->scroll_view);
+			flags |= VuiCtrlFlags_focusable;
+			flags |= VuiCtrlFlags_focusable_no_keyboard_actions;
+			vui_scroll_view_start_(sib_id, content_offset_in_out, size_in_out, flags, &styles->scroll_view);
 		} else {
 			vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal, 0, NULL, VuiTextBoxStyle_interp, NULL);
 		}
@@ -3169,7 +3224,7 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 			_vui.input.focused_text_box.string_len = strlen(string_in_out);
 			_vui.input.focused_text_box.string_cap = string_in_out_cap;
 			_vui.input.focused_text_box.cursor_idx = 0;
-			_vui.input.focused_text_box.select_offset = strlen(string_in_out);
+			_vui.input.focused_text_box.select_offset = 0;
 			_vui.input.focused_text_box.type = type;
 			_vui.input.focused_text_box.is_multiline = is_multiline;
 		} else {
@@ -3178,16 +3233,43 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 			has_changed = _vui.input.focused_text_box.has_changed;
 		}
 
+		if (ctrl->focus_state & VuiFocusState_pressed) {
+			VuiVec2 mouse_pos = VuiVec2_init(_vui.input.mouse.x, _vui.input.mouse.y);
+			VuiVec2 left_top;
+			left_top.x = ctrl->rect.left_top.x + style->padding.left_top.x + text_style->margin.left_top.x + text_style->padding.left_top.x + style->border_width;
+			left_top.y = ctrl->rect.left_top.y + style->padding.left_top.y + text_style->margin.left_top.y + text_style->padding.left_top.y + style->border_width;
+			left_top.x += ctrl->scroll_offset.x;
+			left_top.y += ctrl->scroll_offset.y;
+
+			_vui.input.focused_text_box.cursor_idx = vui_get_text_cursor_idx(
+					_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f,
+					text_style->font_id, text_style->line_height, left_top, mouse_pos);
+			_vui.input.focused_text_box.has_cursor_moved = vui_true;
+		} else if (ctrl->focus_state & VuiFocusState_held) {
+			VuiVec2 mouse_pos = VuiVec2_init(_vui.input.mouse.x, _vui.input.mouse.y);
+			VuiVec2 left_top;
+			left_top.x = ctrl->rect.left_top.x + style->padding.left_top.x + text_style->margin.left_top.x + text_style->padding.left_top.x + style->border_width;
+			left_top.y = ctrl->rect.left_top.y + style->padding.left_top.y + text_style->margin.left_top.y + text_style->padding.left_top.y + style->border_width;
+			left_top.x += ctrl->scroll_offset.x;
+			left_top.y += ctrl->scroll_offset.y;
+
+			uint32_t select_cursor_idx = vui_get_text_cursor_idx(
+					_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f,
+					text_style->font_id, text_style->line_height, left_top, mouse_pos);
+			_vui.input.focused_text_box.select_offset = select_cursor_idx - _vui.input.focused_text_box.cursor_idx;
+			_vui.input.focused_text_box.has_cursor_moved = vui_true;
+		}
+
 		if (_vui.input.focused_text_box.has_cursor_moved || _vui.input.focused_text_box.has_cursor_moved_last_frame) {
 			//
 			// workout the scroll offset of the scroll when the cursor is outside of the box's inner boundary.
 			// only if the cursor has moved.
 			//
 
-			float margin_padding_x = VuiThickness_horizontal(&style->padding) + VuiThickness_horizontal(&text_style->margin);
+			float margin_padding_x = VuiThickness_horizontal(&style->padding) + VuiThickness_horizontal(&text_style->margin) + VuiThickness_horizontal(&text_style->padding);
 			float box_inner_size_x = VuiRect_width(&ctrl->rect) - margin_padding_x - style->border_width * 2.f;
 
-			float margin_padding_y = VuiThickness_vertical(&style->padding) + VuiThickness_vertical(&text_style->margin);
+			float margin_padding_y = VuiThickness_vertical(&style->padding) + VuiThickness_vertical(&text_style->margin) + VuiThickness_vertical(&text_style->padding);
 			float box_inner_size_y = VuiRect_height(&ctrl->rect) - margin_padding_y - style->border_width * 2.f;
 
 			if (is_multiline) {
@@ -3245,10 +3327,18 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 			float scroll_offset_y = ctrl->scroll_offset.y;
 			float cursor_offset_rel_y = cursor_offset.y + text_style->line_height + scroll_offset_y;
 
-			if (cursor_offset_rel_y >= box_inner_size_y) {
-				scroll_offset_y -= (cursor_offset_rel_y - box_inner_size_y) + margin_padding_y;
-			} else if (cursor_offset_rel_y < text_style->line_height) {
-				scroll_offset_y += (0.f - cursor_offset_rel_y) + text_style->line_height + margin_padding_y;
+			if (ctrl->focus_state & VuiFocusState_held) {
+				if (cursor_offset_rel_y >= box_inner_size_y) {
+					scroll_offset_y -= vui_text_box_select_scroll_amount;
+				} else if (cursor_offset_rel_y < text_style->line_height) {
+					scroll_offset_y += vui_text_box_select_scroll_amount;
+				}
+			} else {
+				if (cursor_offset_rel_y >= box_inner_size_y) {
+					scroll_offset_y -= (cursor_offset_rel_y - box_inner_size_y) + margin_padding_y;
+				} else if (cursor_offset_rel_y < text_style->line_height) {
+					scroll_offset_y += (0.f - cursor_offset_rel_y) + text_style->line_height + margin_padding_y;
+				}
 			}
 
 			scroll_offset_y = vui_clamp(scroll_offset_y, -(cursor_offset.y + text_style->line_height), 0.f);
@@ -3943,72 +4033,75 @@ void vui_frame_end() {
 	if ((_vui.input.actions & VuiInputActions_focus_prev) == VuiInputActions_focus_prev) {
 		_VuiWindow* w = &_vui.windows[_vui.focused_window_id];
 		VuiCtrl* ctrl = vui_ctrl_get(w->focused_ctrl_id);
+		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_actions)) {
+			for (int i = 0; i < 2; i += 1) {
+				//
+				// find the previous control in the tree that is focusable.
+				while (ctrl) {
+					if (ctrl->sibling_prev_id == 0) {
+						// we have no previous siblings, navigate up the parent
+						ctrl = vui_ctrl_try_get(ctrl->parent_id);
+						if (!ctrl) break;
+					} else {
+						// goto the previous sibling
+						ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
+						// descend to the most last child of the sibling
+						while (ctrl->child_last_id) ctrl = vui_ctrl_get(ctrl->child_last_id);
+					}
 
-		for (int i = 0; i < 2; i += 1) {
-			//
-			// find the previous control in the tree that is focusable.
-			while (ctrl) {
-				if (ctrl->sibling_prev_id == 0) {
-					// we have no previous siblings, navigate up the parent
-					ctrl = vui_ctrl_try_get(ctrl->parent_id);
-					if (!ctrl) break;
-				} else {
-					// goto the previous sibling
-					ctrl = vui_ctrl_get(ctrl->sibling_prev_id);
-					// descend to the most last child of the sibling
-					while (ctrl->child_last_id) ctrl = vui_ctrl_get(ctrl->child_last_id);
+					if (ctrl->flags & VuiCtrlFlags_focusable)
+						break;
 				}
 
-				if (ctrl->flags & VuiCtrlFlags_focusable)
-					break;
+				// found a control to focus on
+				if (ctrl != NULL || i == 1) break;
+
+				//
+				// we have reached the root of the UI so start from the most last child
+				// and try again
+				ctrl = vui_ctrl_get(w->root_ctrl_id);
+				while (ctrl->child_last_id) {
+					ctrl = vui_ctrl_get(ctrl->child_last_id);
+				}
 			}
 
-			// found a control to focus on
-			if (ctrl != NULL || i == 1) break;
-
-			//
-			// we have reached the root of the UI so start from the most last child
-			// and try again
-			ctrl = vui_ctrl_get(w->root_ctrl_id);
-			while (ctrl->child_last_id) {
-				ctrl = vui_ctrl_get(ctrl->child_last_id);
-			}
+			vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 		}
-
-		vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 	} else if ((_vui.input.actions & VuiInputActions_focus_next) == VuiInputActions_focus_next) {
 		_VuiWindow* w = &_vui.windows[_vui.focused_window_id];
 		VuiCtrl* ctrl = vui_ctrl_get(w->focused_ctrl_id);
-		for (int i = 0; i < 2; i += 1) {
-			//
-			// traverse the tree next until we come across another focusable control.
-			while (ctrl) {
-				if (ctrl->child_first_id) { // go to the first child if we have one.
-					ctrl = vui_ctrl_get(ctrl->child_first_id);
-				} else if (ctrl->sibling_next_id) { // go to the next sibling if we have no child
-					ctrl = vui_ctrl_get(ctrl->sibling_next_id);
-				} else { // else go up the parent controls until they have a next sibling.
-					while (ctrl) {
-						ctrl = vui_ctrl_try_get(ctrl->parent_id);
-						if (ctrl && ctrl->sibling_next_id) {
-							ctrl = vui_ctrl_get(ctrl->sibling_next_id);
-							break;
+		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_actions)) {
+			for (int i = 0; i < 2; i += 1) {
+				//
+				// traverse the tree next until we come across another focusable control.
+				while (ctrl) {
+					if (ctrl->child_first_id) { // go to the first child if we have one.
+						ctrl = vui_ctrl_get(ctrl->child_first_id);
+					} else if (ctrl->sibling_next_id) { // go to the next sibling if we have no child
+						ctrl = vui_ctrl_get(ctrl->sibling_next_id);
+					} else { // else go up the parent controls until they have a next sibling.
+						while (ctrl) {
+							ctrl = vui_ctrl_try_get(ctrl->parent_id);
+							if (ctrl && ctrl->sibling_next_id) {
+								ctrl = vui_ctrl_get(ctrl->sibling_next_id);
+								break;
+							}
 						}
 					}
+
+					if (!ctrl) break;
+					if (ctrl->flags & VuiCtrlFlags_focusable)
+						break;
 				}
 
-				if (!ctrl) break;
-				if (ctrl->flags & VuiCtrlFlags_focusable)
-					break;
+				// see if we found a control.
+				// if not loop back around from the root and find the first focusable control.
+				if (ctrl || i == 1) break;
+				ctrl = vui_ctrl_get(w->root_ctrl_id);
 			}
 
-			// see if we found a control.
-			// if not loop back around from the root and find the first focusable control.
-			if (ctrl || i == 1) break;
-			ctrl = vui_ctrl_get(w->root_ctrl_id);
+			vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 		}
-
-		vui_ctrl_set_focused(ctrl ? ctrl->id : 0);
 	}
 
 	_vui.input.mouse.offset_x = 0;

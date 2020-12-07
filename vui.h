@@ -19,6 +19,7 @@
 #define VUI_DEBUG_CTRL_LAYOUT 1
 
 #define vui_debug_ctrl_layout_dump_file_path "/tmp/vui_ctrls"
+#define vui_text_box_select_scroll_amount 4.0f
 
 //
 // you can redefine these macros to supply your own custom memory allocation
@@ -106,6 +107,7 @@ static inline void* vui_ptr_round_down_align(void* ptr, uintptr_t align) {
 #define _vui_defer_loop(start_expr, end_expr) for (int _i_ = (start_expr, 0); _i_ < 1; _i_ += 1, end_expr)
 
 uint32_t vui_utf8_codepoint(const char* str, int32_t* out_codepoint);
+uint32_t vui_utf8_prev_char(const char* str, uint32_t idx);
 VuiBool vui_utf8_is_codepoint_boundary(char ch);
 VuiBool vui_utf8_is_word_delimiter(int32_t codept);
 VuiBool vui_utf8_is_whitespace(int32_t codept);
@@ -330,6 +332,7 @@ union VuiVec4 {
 #define VuiThickness_hv(thickness) VuiVec2_init(((thickness).left + (thickness).right), (thickness).top + (thickness).bottom)
 static inline float VuiThickness_horizontal(const VuiThickness* thickness) { return thickness->left + thickness->right; }
 static inline float VuiThickness_vertical(const VuiThickness* thickness) { return thickness->top + thickness->bottom; }
+static inline VuiVec2 VuiThickness_size(const VuiThickness* thickness) { return VuiVec2_init(thickness->left + thickness->right, thickness->top + thickness->bottom); }
 static inline void VuiThickness_lerp(VuiThickness* result, const VuiThickness* to, const VuiThickness* from, float interp_ratio) {
 	result->left = vui_lerp(to->left, from->left, interp_ratio);
 	result->top = vui_lerp(to->top, from->top, interp_ratio);
@@ -633,6 +636,7 @@ enum {
 	VuiCtrlFlags_toggleable = 0x200,
 	VuiCtrlFlags_selectable = 0x400,
 	VuiCtrlFlags_focusable_scroll = 0x800,
+	VuiCtrlFlags_focusable_no_keyboard_actions = 0x1000,
 	_VuiCtrlFlags_show_vertical_bar = 0x2000,
 	_VuiCtrlFlags_show_horizontal_bar = 0x4000,
 };
@@ -1256,7 +1260,7 @@ extern VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const Vu
 extern VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
 extern VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
 
-typedef uint8_t VuiScrollFlags;
+typedef VuiCtrlFlags VuiScrollFlags;
 //
 // WARNING: these must share the same values as the ones in VuiCtrlFlags.
 enum {
@@ -1345,7 +1349,25 @@ extern void vui_image_remove(VuiImageId image_id);
 typedef uint16_t VuiViewportId;
 
 typedef void (*VuiRenderGlyphFn)(const VuiRect* rect, VuiTextureId glyph_texture_id, const VuiRect* uv_rect);
-typedef VuiVec2 (*VuiPositionTextFn)(void* userdata, VuiFontId font_id, float line_height, char* text, uint32_t text_length, float word_wrap_at_width, VuiVec2 top_left, uint32_t cursor_num, VuiRenderGlyphFn render_glyph_fn);
+typedef struct VuiPositionTextArgs VuiPositionTextArgs;
+struct VuiPositionTextArgs {
+	void* userdata;
+	VuiFontId font_id;
+	float line_height;
+	char* text;
+	uint32_t text_length;
+	float word_wrap_at_width;
+	VuiVec2 top_left;
+	uint32_t cursor_num;
+	VuiVec2 cursor_pos;
+	VuiRenderGlyphFn render_glyph_fn;
+};
+typedef union VuiPositionTextRet VuiPositionTextRet;
+union VuiPositionTextRet {
+	VuiVec2 vec2;
+	uint32_t u32;
+};
+typedef VuiPositionTextRet (*VuiPositionTextFn)(VuiPositionTextArgs* args);
 typedef void (*VuiTextBoxFocusChange)(VuiBool focused);
 
 typedef struct {
