@@ -3538,8 +3538,7 @@ uint32_t _vui_text_nav_home(uint32_t idx) {
 
 	//
 	// move backwards until a newline character comes before the index.
-	idx -= 1;
-	while (idx) {
+	while (idx--) {
 		if (vui_utf8_is_codepoint_boundary(string[idx])) {
 			char ch = string[idx];
 			if (ch == '\n') {
@@ -3547,8 +3546,10 @@ uint32_t _vui_text_nav_home(uint32_t idx) {
 				break;
 			}
 		}
-		idx -= 1;
 	}
+
+	if (idx == UINT32_MAX)
+		idx = 0;
 
 	return idx;
 }
@@ -3584,8 +3585,7 @@ uint32_t _vui_text_column_idx(uint32_t idx, uint32_t* column_idx_out) {
 	//
 	// TODO: this will not word for multi codepoint characters.
 	// move backwards and count how many codepoints we are from the start of the line.
-	idx -= 1;
-	while (idx) {
+	while (idx--) {
 		if (vui_utf8_is_codepoint_boundary(string[idx])) {
 			char ch = string[idx];
 			if (ch == '\n') {
@@ -3593,12 +3593,10 @@ uint32_t _vui_text_column_idx(uint32_t idx, uint32_t* column_idx_out) {
 			}
 			column_idx += 1;
 		}
-		idx -= 1;
 	}
 
-	if (idx == 0) { // add 1 here when the first character has not been processed in the previous loop
-		column_idx += 1;
-	}
+	if (idx == UINT32_MAX)
+		idx = 0;
 
 	*column_idx_out = column_idx;
 	return idx;
@@ -3627,7 +3625,15 @@ uint32_t _vui_text_nav_up(uint32_t idx) {
 		column_idx = _vui.input.focused_text_box.cursor_max_last_unchanged_column_idx;
 	}
 
-	if (idx == 0) return start_idx;
+	if (idx == 0) {
+		if (string[idx] == '\r' || string[idx] == '\n') {
+			// empty first line, so return the first index
+			return 0;
+		} else {
+			// else, we are navigating up from the first line, so do not move anywhere
+			return start_idx;
+		}
+	}
 
 	//
 	// go to the start of the previous line
@@ -3655,10 +3661,12 @@ uint32_t _vui_text_nav_down(uint32_t idx) {
 	if (idx == string_len) return idx;
 
 	uint32_t column_idx = 0;
-	idx = _vui_text_column_idx(idx, &column_idx);
 	if (idx) {
-		// move off the new line
-		idx += 1;
+		idx = _vui_text_column_idx(idx, &column_idx);
+		if (idx || string[idx] == '\r' || string[idx] == '\n') {
+			// move off the new line
+			idx += 1;
+		}
 	}
 
 	//
