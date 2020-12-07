@@ -637,8 +637,9 @@ enum {
 	VuiCtrlFlags_selectable = 0x400,
 	VuiCtrlFlags_focusable_scroll = 0x800,
 	VuiCtrlFlags_focusable_no_keyboard_actions = 0x1000,
-	_VuiCtrlFlags_show_vertical_bar = 0x2000,
-	_VuiCtrlFlags_show_horizontal_bar = 0x4000,
+	VuiCtrlFlags_focusable_no_keyboard_focus_nav = 0x2000,
+	_VuiCtrlFlags_show_vertical_bar = 0x4000,
+	_VuiCtrlFlags_show_horizontal_bar = 0x8000,
 };
 
 typedef uint8_t VuiLayoutType;

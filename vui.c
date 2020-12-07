@@ -3186,10 +3186,11 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 	vui_scope_height(vui_auto_len) {
 		if (is_multiline) {
 			flags |= VuiCtrlFlags_focusable;
+			flags |= VuiCtrlFlags_focusable_no_keyboard_focus_nav;
 			flags |= VuiCtrlFlags_focusable_no_keyboard_actions;
 			vui_scroll_view_start_(sib_id, content_offset_in_out, size_in_out, flags, &styles->scroll_view);
 		} else {
-			vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal, 0, NULL, VuiTextBoxStyle_interp, NULL);
+			vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_scrollable_horizontal | VuiCtrlFlags_focusable_no_keyboard_actions, 0, NULL, VuiTextBoxStyle_interp, NULL);
 		}
 	}
 
@@ -3324,26 +3325,28 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 			// see the comments above for the x axis and apply them to this code.
 			//
 
-			float scroll_offset_y = ctrl->scroll_offset.y;
-			float cursor_offset_rel_y = cursor_offset.y + text_style->line_height + scroll_offset_y;
+			if (is_multiline) {
+				float scroll_offset_y = ctrl->scroll_offset.y;
+				float cursor_offset_rel_y = cursor_offset.y + text_style->line_height + scroll_offset_y;
 
-			if (ctrl->focus_state & VuiFocusState_held) {
-				if (cursor_offset_rel_y >= box_inner_size_y) {
-					scroll_offset_y -= vui_text_box_select_scroll_amount;
-				} else if (cursor_offset_rel_y < text_style->line_height) {
-					scroll_offset_y += vui_text_box_select_scroll_amount;
+				if (ctrl->focus_state & VuiFocusState_held) {
+					if (cursor_offset_rel_y >= box_inner_size_y) {
+						scroll_offset_y -= vui_text_box_select_scroll_amount;
+					} else if (cursor_offset_rel_y < text_style->line_height) {
+						scroll_offset_y += vui_text_box_select_scroll_amount;
+					}
+				} else {
+					if (cursor_offset_rel_y >= box_inner_size_y) {
+						scroll_offset_y -= (cursor_offset_rel_y - box_inner_size_y) + margin_padding_y;
+					} else if (cursor_offset_rel_y < text_style->line_height) {
+						scroll_offset_y += (0.f - cursor_offset_rel_y) + text_style->line_height + margin_padding_y;
+					}
 				}
-			} else {
-				if (cursor_offset_rel_y >= box_inner_size_y) {
-					scroll_offset_y -= (cursor_offset_rel_y - box_inner_size_y) + margin_padding_y;
-				} else if (cursor_offset_rel_y < text_style->line_height) {
-					scroll_offset_y += (0.f - cursor_offset_rel_y) + text_style->line_height + margin_padding_y;
-				}
+
+				scroll_offset_y = vui_clamp(scroll_offset_y, -(cursor_offset.y + text_style->line_height), 0.f);
+
+				ctrl->scroll_offset.y = scroll_offset_y;
 			}
-
-			scroll_offset_y = vui_clamp(scroll_offset_y, -(cursor_offset.y + text_style->line_height), 0.f);
-
-			ctrl->scroll_offset.y = scroll_offset_y;
 		}
 	}
 
@@ -4033,7 +4036,7 @@ void vui_frame_end() {
 	if ((_vui.input.actions & VuiInputActions_focus_prev) == VuiInputActions_focus_prev) {
 		_VuiWindow* w = &_vui.windows[_vui.focused_window_id];
 		VuiCtrl* ctrl = vui_ctrl_get(w->focused_ctrl_id);
-		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_actions)) {
+		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_focus_nav)) {
 			for (int i = 0; i < 2; i += 1) {
 				//
 				// find the previous control in the tree that is focusable.
@@ -4070,7 +4073,7 @@ void vui_frame_end() {
 	} else if ((_vui.input.actions & VuiInputActions_focus_next) == VuiInputActions_focus_next) {
 		_VuiWindow* w = &_vui.windows[_vui.focused_window_id];
 		VuiCtrl* ctrl = vui_ctrl_get(w->focused_ctrl_id);
-		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_actions)) {
+		if (!(ctrl->flags & VuiCtrlFlags_focusable_no_keyboard_focus_nav)) {
 			for (int i = 0; i < 2; i += 1) {
 				//
 				// traverse the tree next until we come across another focusable control.
