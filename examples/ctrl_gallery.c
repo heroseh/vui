@@ -73,6 +73,8 @@ struct App {
 	VuiFontId default_font_id;
 	VuiImageId images[5];
 	VuiStk(char) font_file_bytes;
+	uint64_t last_frame_start_time;
+	float dt;
 	struct {
 		GLuint tex_ascii_glyph_texture;
 		GLuint tex_etc_glyph_texture;
@@ -85,7 +87,7 @@ struct App {
 App app;
 
 void build_ui() {
-	vui_frame_start(vui_false);
+	vui_frame_start(vui_false, app.dt);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
 	vui_row_layout();
@@ -94,23 +96,25 @@ void build_ui() {
 	static VuiVec2 offset = {50.f, 50.f};
 	vui_scope_width(vui_fill_len)
 	vui_scope_height(vui_fill_len)
-	vui_scroll_view_start(vui_sib_id, VuiScrollFlags_vhr, &vui_ss.scroll_view);
+	vui_scroll_view_start(vui_sib_id, VuiScrollFlags_vhr, vui_ss.scroll_view);
 
 	vui_row_layout();
-	{
+	vui_scope_style_transition_time(250.0) {
 
-		vui_text(vui_sib_id, "Buttons", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Buttons", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
-			VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
-			vui_image_button(vui_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
-			vui_image_text_button(vui_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
+			{
+				VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
+				vui_image_button(vui_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
+				vui_image_text_button(vui_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
+			}
 		}
 
-		vui_text(vui_sib_id, "Toggle Buttons", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Toggle Buttons", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
@@ -119,8 +123,8 @@ void build_ui() {
 			vui_image_text_toggle_button(vui_sib_id, NULL, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
-		vui_text(vui_sib_id, "Select Buttons", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Select Buttons", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
@@ -130,8 +134,8 @@ void build_ui() {
 			vui_image_text_select_button(vui_sib_id, &selected_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
-		vui_text(vui_sib_id, "Check Boxes", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Check Boxes", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
@@ -139,8 +143,8 @@ void build_ui() {
 			vui_image_check_box(vui_sib_id, NULL, app.images[3], VuiColor_white, vui_ss.check_box);
 		}
 
-		vui_text(vui_sib_id, "Radio Buttons", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Radio Buttons", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
@@ -149,8 +153,8 @@ void build_ui() {
 			vui_image_radio_button(vui_sib_id, &selected_sib_id, app.images[3], VuiColor_white, vui_ss.radio_button);
 		}
 
-		vui_text(vui_sib_id, "Progress Bar", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Progress Bar", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		{
 			static float value = 0.f;
 			static VuiBool go_backward = vui_false;
@@ -168,16 +172,16 @@ void build_ui() {
 
 			vui_scope_width(200.f)
 			vui_scope_height(40.f)
-			vui_progress_bar(vui_sib_id, value, 0.f, 500.f, &vui_ss.progress_bar);
+			vui_progress_bar(vui_sib_id, value, 0.f, 500.f, vui_ss.progress_bar);
 		}
 
-		vui_text(vui_sib_id, "Text & Input Boxes", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Text & Input Boxes", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
 			vui_scope_align(VuiAlign_left_center) {
-				vui_text(vui_sib_id, "Text:  ", 0.f, &vui_ss.text_menu);
+				vui_text(vui_sib_id, "Text:  ", 0.f, vui_ss.text_menu);
 				static char buf[32] = {0};
 				vui_scope_width(200.f)
 				vui_text_box(vui_sib_id, buf, sizeof(buf), vui_ss.text_box);
@@ -187,11 +191,11 @@ void build_ui() {
 			vui_column_layout();
 
 			vui_scope_align(VuiAlign_left_center) {
-				vui_text(vui_sib_id, "Uint:  ", 0.f, &vui_ss.text_menu);
+				vui_text(vui_sib_id, "Uint:  ", 0.f, vui_ss.text_menu);
 				static uint32_t value = 0;
 				vui_scope_width(200.f) {
 					vui_input_box_uint(vui_sib_id, &value, vui_ss.text_box);
-					vui_slider_uint(vui_sib_id, &value, 0, 5, &vui_ss.slider);
+					vui_slider_uint(vui_sib_id, &value, 0, 5, vui_ss.slider);
 				}
 			}
 		}
@@ -199,11 +203,11 @@ void build_ui() {
 			vui_column_layout();
 
 			vui_scope_align(VuiAlign_left_center) {
-				vui_text(vui_sib_id, "Sint:  ", 0.f, &vui_ss.text_menu);
+				vui_text(vui_sib_id, "Sint:  ", 0.f, vui_ss.text_menu);
 				static int32_t value = 0;
 				vui_scope_width(200.f) {
 					vui_input_box_sint(vui_sib_id, &value, vui_ss.text_box);
-					vui_slider_sint(vui_sib_id, &value, -10, 10, &vui_ss.slider);
+					vui_slider_sint(vui_sib_id, &value, -10, 10, vui_ss.slider);
 				}
 			}
 		}
@@ -211,35 +215,35 @@ void build_ui() {
 			vui_column_layout();
 
 			vui_scope_align(VuiAlign_left_center) {
-				vui_text(vui_sib_id, "Float: ", 0.f, &vui_ss.text_menu);
+				vui_text(vui_sib_id, "Float: ", 0.f, vui_ss.text_menu);
 				static float value = 0;
 				vui_scope_width(200.f) {
 					vui_input_box_float(vui_sib_id, &value, vui_ss.text_box);
-					vui_slider_float(vui_sib_id, &value, -500.f, 500.f, &vui_ss.slider);
+					vui_slider_float(vui_sib_id, &value, -500.f, 500.f, vui_ss.slider);
 				}
 			}
 		}
 
-		vui_text(vui_sib_id, "Text Wrapping", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Text Wrapping", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 
 		static float word_wrap_at_width = 0.f;
 		vui_scope_width(200.f) {
 			vui_input_box_float(vui_sib_id, &word_wrap_at_width, vui_ss.text_box);
-			vui_slider_float(vui_sib_id, &word_wrap_at_width, 0.f, 1000.f, &vui_ss.slider);
+			vui_slider_float(vui_sib_id, &word_wrap_at_width, 0.f, 1000.f, vui_ss.slider);
 		}
 
-		vui_text(vui_sib_id, "This is an example of multi-line word-wrapping that has been...\nDesigned to be used as a test!!!\nDrag the slider to change the word_wrap_at_width value...\n\n...\n", word_wrap_at_width, &vui_ss.text_header);
+		vui_text(vui_sib_id, "This is an example of multi-line word-wrapping that has been...\nDesigned to be used as a test!!!\nDrag the slider to change the word_wrap_at_width value...\n\n...\n", word_wrap_at_width, vui_ss.text_header);
 
-		vui_text(vui_sib_id, "Multiline Text Box", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Multiline Text Box", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 
 		static char buf[1024] = {0};
 		vui_scope_width(200.f)
 		vui_text_box_multiline(vui_sib_id, buf, sizeof(buf), VuiScrollFlags_vhr, vui_ss.text_box);
 
-		vui_text(vui_sib_id, "Multiline Text Box", 0.f, &vui_ss.text_header);
-		vui_separator(vui_sib_id, &vui_ss.separator);
+		vui_text(vui_sib_id, "Multiline Text Box", 0.f, vui_ss.text_header);
+		vui_separator(vui_sib_id, vui_ss.separator);
 	}
 	vui_scroll_view_end();
 
@@ -559,6 +563,11 @@ void App_init() {
 }
 
 void App_update() {
+	uint64_t frame_start_time = SDL_GetPerformanceCounter();
+	app.dt = (double)((frame_start_time - app.last_frame_start_time)*1000) / (double)SDL_GetPerformanceFrequency();
+	app.last_frame_start_time = frame_start_time;
+
+
 	//
 	// remove all the glyphs from the glyph texture that holds all the different sized or non ASCII glyphs.
 	vui_stbtt_glyph_texture_clear_styled_glyphs(app.etc_glyph_texture_id);

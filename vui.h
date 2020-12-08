@@ -21,6 +21,53 @@
 #define vui_debug_ctrl_layout_dump_file_path "/tmp/vui_ctrls"
 #define vui_text_box_select_scroll_amount 4.0f
 
+#ifndef VuiCtrlStyle_max_colors
+#define VuiCtrlStyle_max_colors 2
+#endif
+
+#ifndef VuiCtrlStyle_max_sizes
+#define VuiCtrlStyle_max_sizes 2
+#endif
+
+#ifndef VuiCtrlStyle_max_children
+#define VuiCtrlStyle_max_children 3
+#endif
+
+//
+// when making custom controls that have custom style entries.
+// you can to extend the sizes, colors or children of the VuiCtrlStyle
+// by defining the macros below.
+// EG:
+// #define inline_VuiCtrlStyleUserExtColors \
+//     struct { \
+//         VuiColor my_button_style_attribute; \
+//         struct { \
+//             VuiColor my_text_box_style_attribute_1; \
+//             VuiColor my_text_box_style_attribute_2; \
+//         } \
+//     }
+//
+
+#ifndef inline_VuiCtrlStyleUserExtColors
+#define inline_VuiCtrlStyleUserExtColors
+#endif
+
+#ifndef inline_VuiCtrlStyleUserExtSizes
+#define inline_VuiCtrlStyleUserExtSizes
+#endif
+
+#ifndef inline_VuiCtrlStyleUserExtChildren
+#define inline_VuiCtrlStyleUserExtChildren
+#endif
+
+#ifndef inline_VuiCtrlStyleUserExt
+#define inline_VuiCtrlStyleUserExt
+#endif
+
+#ifndef VuiCtrlStyleUserExt_lerp
+#define VuiCtrlStyleUserExt_lerp(dst, to, from, interp_ratio)
+#endif
+
 //
 // you can redefine these macros to supply your own custom memory allocation
 #if !defined(vui_mem_alloc)
@@ -508,6 +555,7 @@ struct VuiCtrlAttrs {
 	VuiVec2 offset;
 	VuiAlign align;
 	VuiImageScaleMode image_scale_mode;
+	float style_transition_time;
 };
 
 typedef uint8_t VuiCtrlAttr;
@@ -524,6 +572,7 @@ enum {
 	VuiCtrlAttr_layout_wrap_spacing,
 	VuiCtrlAttr_layout_wrap,
     VuiCtrlAttr_image_scale_mode,
+    VuiCtrlAttr_style_transition_time,
     VuiCtrlAttr_COUNT,
 };
 
@@ -544,6 +593,8 @@ enum {
 	VuiCtrlState_disabled,
 	VuiCtrlState_COUNT,
 };
+
+extern char* VuiCtrlState_strings[VuiCtrlState_COUNT];
 
 typedef uint8_t VuiCtrlStateFlags;
 enum {
@@ -624,6 +675,10 @@ extern void _vui_pop_ctrl_attr(VuiCtrlAttr attr);
 #define vui_pop_image_scale_mode() _vui_pop_ctrl_attr(VuiCtrlAttr_image_scale_mode)
 #define vui_scope_image_scale_mode(value) _vui_defer_loop(vui_push_image_scale_mode(value), vui_pop_image_scale_mode())
 
+#define vui_push_style_transition_time(value) _vui_push_ctrl_attr(VuiCtrlAttr_style_transition_time, (VuiCtrlAttrValue) { .float_ = value })
+#define vui_pop_style_transition_time() _vui_pop_ctrl_attr(VuiCtrlAttr_style_transition_time)
+#define vui_scope_style_transition_time(value) _vui_defer_loop(vui_push_style_transition_time(value), vui_pop_style_transition_time())
+
 typedef uint64_t VuiCtrlFlags;
 enum {
 	VuiCtrlFlags_focusable = 0x1,
@@ -650,10 +705,65 @@ enum {
 };
 extern char* VuiLayoutType_strings[];
 
-typedef struct VuiCtrl VuiCtrl;
 typedef struct VuiCtrlStyle VuiCtrlStyle;
-typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, const VuiCtrlStyle* style, VuiRect* content_rect);
-typedef void (*VuiCtrlStyleInterpFn)(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
+struct VuiCtrlStyle {
+	VuiThickness margin;
+	VuiThickness padding;
+	VuiColor bg_color;
+	VuiColor border_color;
+	float border_width;
+	float radius;
+
+	union {
+		VuiColor colors[VuiCtrlStyle_max_colors];
+		struct {
+			VuiColor selection_color;
+			VuiColor cursor_color;
+		};
+		VuiColor text_color;
+		VuiColor bar_color;
+		VuiColor check_color;
+		inline_VuiCtrlStyleUserExtColors;
+	};
+
+	union {
+		float sizes[VuiCtrlStyle_max_sizes];
+		struct {
+			float bar_height;
+			float button_width;
+		};
+		float text_line_height;
+		float check_size;
+		float slider_width;
+		float cursor_width;
+		float separator_size;
+		inline_VuiCtrlStyleUserExtSizes;
+	};
+
+	VuiFontId font_id;
+	union {
+		//
+		// all of these styles points to an array of styles, one for for each VuiCtrlState value
+		const VuiCtrlStyle* children[VuiCtrlStyle_max_children];
+		struct {
+			union {
+				const VuiCtrlStyle* image_styles;
+				const VuiCtrlStyle* bar_styles;
+			};
+			union {
+				const VuiCtrlStyle* text_styles;
+				const VuiCtrlStyle* button_styles;
+			};
+			const VuiCtrlStyle* slider_styles;
+		};
+		inline_VuiCtrlStyleUserExtChildren;
+	};
+
+	inline_VuiCtrlStyleUserExt;
+};
+
+typedef struct VuiCtrl VuiCtrl;
+typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, const VuiCtrlStyle* styles, VuiRect* content_rect);
 struct VuiCtrl {
 	VuiCtrlId id;
 	VuiCtrlId parent_id;
@@ -672,10 +782,13 @@ struct VuiCtrl {
 	VuiCtrlRenderFn render_fn;
 	VuiVec2 scroll_offset;
 
-	VuiCtrlStyleInterpFn style_interp_fn;
-	const VuiCtrlStyle* style;
-	const VuiCtrlStyle* target_style;
-	float interp_ratio;
+	float state_time;
+	VuiCtrlState state;
+	VuiCtrlState prev_state;
+
+	const VuiCtrlStyle* styles; // this is an array to be index with VuiCtrlState
+	VuiCtrlStyle prev_style;
+	VuiCtrlStyle style;
 
 	union {
 		struct {
@@ -693,159 +806,6 @@ struct VuiCtrl {
 	};
 	VuiCtrlAttrs attributes;
 };
-
-extern VuiCtrlState VuiCtrl_state(VuiCtrl* ctrl);
-extern void VuiCtrl_target_style(VuiCtrl* ctrl, const VuiCtrlStyle* target_style);
-extern VuiThickness VuiCtrl_interp_margin(VuiCtrl* ctrl);
-extern VuiThickness VuiCtrl_interp_padding(VuiCtrl* ctrl);
-
-#define inline_VuiCtrlStyle \
-	struct { \
-		VuiThickness margin; \
-		VuiThickness padding; \
-		VuiColor bg_color; \
-		VuiColor border_color; \
-		float border_width; \
-		float radius; \
-	}
-
-struct VuiCtrlStyle {
-	inline_VuiCtrlStyle;
-};
-
-extern void VuiCtrlStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiTextStyle VuiTextStyle;
-struct VuiTextStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	VuiFontId font_id;
-	VuiColor color;
-	float line_height;
-};
-
-extern void VuiTextStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiSeparatorStyle VuiSeparatorStyle;
-struct VuiSeparatorStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	float size;
-};
-
-extern void VuiSeparatorStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-#define inline_VuiButtonStyle \
-	struct { \
-		union { \
-			inline_VuiCtrlStyle; \
-			VuiCtrlStyle ctrl; \
-		}; \
-		const VuiCtrlStyle* image_style; \
-		const VuiTextStyle* text_style; \
-	}
-
-typedef struct VuiButtonStyle VuiButtonStyle;
-struct VuiButtonStyle {
-	inline_VuiButtonStyle;
-};
-
-extern void VuiButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiCheckBoxStyle VuiCheckBoxStyle;
-struct VuiCheckBoxStyle {
-	union {
-		inline_VuiButtonStyle;
-		VuiButtonStyle button;
-	};
-	VuiColor check_color;
-	float check_size;
-};
-
-extern void VuiCheckBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiRadioButtonStyle VuiRadioButtonStyle;
-struct VuiRadioButtonStyle {
-	union {
-		inline_VuiButtonStyle;
-		VuiButtonStyle button;
-	};
-	VuiColor check_color;
-	float check_size;
-};
-
-extern void VuiRadioButtonStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiSliderStyle VuiSliderStyle;
-struct VuiSliderStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	const VuiCtrlStyle* bar_style;
-	const VuiButtonStyle* button_style; // points to an array of styles, one for for each VuiCtrlState value
-	float bar_height;
-	float button_width;
-};
-
-extern void VuiSliderStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiProgressBarStyle VuiProgressBarStyle;
-struct VuiProgressBarStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	VuiColor bar_color;
-};
-
-extern void VuiProgressBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiScrollBarStyle VuiScrollBarStyle;
-struct VuiScrollBarStyle {
-	union {
-		inline_VuiCtrlStyle;
-		VuiCtrlStyle ctrl;
-	};
-	const VuiButtonStyle* slider_style; // points to an array of styles, one for for each VuiCtrlState value
-	float slider_width;
-};
-
-extern void VuiScrollBarStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-#define inline_VuiScrollViewStyle \
-	struct { \
-		union { \
-			inline_VuiCtrlStyle; \
-			VuiCtrlStyle ctrl; \
-		}; \
-		const VuiScrollBarStyle* bar_style; \
-	}
-
-typedef struct VuiScrollViewStyle VuiScrollViewStyle;
-struct VuiScrollViewStyle {
-	inline_VuiScrollViewStyle;
-};
-
-extern void VuiScrollViewStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
-
-typedef struct VuiTextBoxStyle VuiTextBoxStyle;
-struct VuiTextBoxStyle {
-	union {
-		inline_VuiScrollViewStyle;
-		VuiScrollViewStyle scroll_view;
-	};
-	const VuiTextStyle* text_style;
-	VuiColor selection_color;
-	VuiColor cursor_color;
-	float cursor_width;
-};
-
-extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to, const VuiCtrlStyle* from, float interp_ratio);
 
 // ===========================================================================================
 //
@@ -897,28 +857,28 @@ extern void VuiTextBoxStyle_interp(VuiCtrlStyle* result, const VuiCtrlStyle* to,
 #define vui_color_midnight_blue VuiColor_init(0x2c, 0x3e, 0x50, 0xff)
 
 typedef struct {
-	VuiCtrlStyle image;
-	VuiCtrlStyle box_panel;
-	VuiTextStyle text_header;
-	VuiTextStyle text_menu;
-	VuiSeparatorStyle separator;
-	VuiButtonStyle button_action[VuiCtrlState_COUNT];
-	VuiButtonStyle button_confirm[VuiCtrlState_COUNT];
-	VuiButtonStyle button_deny[VuiCtrlState_COUNT];
-	VuiButtonStyle button_info[VuiCtrlState_COUNT];
-	VuiButtonStyle toggle_button[VuiCtrlState_COUNT];
-	VuiButtonStyle select_button[VuiCtrlState_COUNT];
-	VuiCheckBoxStyle check_box[VuiCtrlState_COUNT];
-	VuiRadioButtonStyle radio_button[VuiCtrlState_COUNT];
-	VuiCtrlStyle slider_bar;
-	VuiSliderStyle slider;
-	VuiProgressBarStyle progress_bar;
-	VuiTextBoxStyle text_box[VuiCtrlState_COUNT];
-	VuiCtrlStyle text_box_selection;
-	VuiCtrlStyle text_box_cursor;
-	VuiScrollViewStyle scroll_view;
-	VuiScrollBarStyle scroll_bar;
-	VuiButtonStyle scroll_bar_slider[VuiCtrlState_COUNT];
+	VuiCtrlStyle image[VuiCtrlState_COUNT];
+	VuiCtrlStyle box_panel[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_header[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_menu[VuiCtrlState_COUNT];
+	VuiCtrlStyle separator[VuiCtrlState_COUNT];
+	VuiCtrlStyle button_action[VuiCtrlState_COUNT];
+	VuiCtrlStyle button_confirm[VuiCtrlState_COUNT];
+	VuiCtrlStyle button_deny[VuiCtrlState_COUNT];
+	VuiCtrlStyle button_info[VuiCtrlState_COUNT];
+	VuiCtrlStyle toggle_button[VuiCtrlState_COUNT];
+	VuiCtrlStyle select_button[VuiCtrlState_COUNT];
+	VuiCtrlStyle check_box[VuiCtrlState_COUNT];
+	VuiCtrlStyle radio_button[VuiCtrlState_COUNT];
+	VuiCtrlStyle slider_bar[VuiCtrlState_COUNT];
+	VuiCtrlStyle slider[VuiCtrlState_COUNT];
+	VuiCtrlStyle progress_bar[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_box[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_box_selection[VuiCtrlState_COUNT];
+	VuiCtrlStyle text_box_cursor[VuiCtrlState_COUNT];
+	VuiCtrlStyle scroll_view[VuiCtrlState_COUNT];
+	VuiCtrlStyle scroll_bar[VuiCtrlState_COUNT];
+	VuiCtrlStyle scroll_bar_slider[VuiCtrlState_COUNT];
 } VuiStyleSheet;
 extern VuiStyleSheet vui_ss;
 
@@ -1053,11 +1013,11 @@ enum {
 
 extern VuiCtrl* vui_ctrl_get(VuiCtrlId ctrl_id);
 extern VuiCtrl* vui_ctrl_try_get(VuiCtrlId ctrl_id);
-#define vui_ctrl_start(sib_id, style) vui_ctrl_start_(sib_id, 0, 0, style, VuiCtrlStyle_interp, NULL)
-extern void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change, const VuiCtrlStyle* style, VuiCtrlStyleInterpFn style_interp_fn, VuiCtrlRenderFn render_fn);
+#define vui_ctrl_start(sib_id, styles) vui_ctrl_start_(sib_id, 0, 0, styles, NULL)
+extern void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change, const VuiCtrlStyle styles[VuiCtrlState_COUNT], VuiCtrlRenderFn render_fn);
 extern void vui_ctrl_end();
-static inline void vui_ctrl(VuiCtrlSibId sib_id, const VuiCtrlStyle* style) {
-	vui_ctrl_start(sib_id, style);
+static inline void vui_ctrl(VuiCtrlSibId sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
+	vui_ctrl_start(sib_id, styles);
 	vui_ctrl_end();
 }
 #define vui_scope_ctrl(sib_id, style) _vui_defer_loop(vui_ctrl_start(sib_id, style), vui_ctrl_end())
@@ -1073,7 +1033,7 @@ static inline void vui_ctrl(VuiCtrlSibId sib_id, const VuiCtrlStyle* style) {
 // @param word_wrap_at_width = 0.0 to not have word wrapping
 //
 #define vui_text(sib_id, text, word_wrap_at_width, style) vui_text_(sib_id, text, strlen(text), word_wrap_at_width, style)
-extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float word_wrap_at_width, const VuiTextStyle* style);
+extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, float word_wrap_at_width, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1085,10 +1045,10 @@ extern void vui_text_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, flo
 // @param image_tint: the color to be multiplied with the image pixels.
 //                    can be used to make the image transparent or reduce a certain color channel.
 //                    to show the image unchanged, provide a value of vui_color_white.
-extern void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle* style);
+extern void vui_image(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 extern void vui_spacing(VuiCtrlSibId sib_id, float width, float height);
-extern void vui_separator(VuiCtrlSibId sib_id, const VuiSeparatorStyle* style);
+extern void vui_separator(VuiCtrlSibId sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1100,14 +1060,14 @@ extern void vui_separator(VuiCtrlSibId sib_id, const VuiSeparatorStyle* style);
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-extern VuiFocusState vui_button_start(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_button_start(VuiCtrlSibId sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 extern void vui_button_end();
-extern VuiFocusState vui_button(VuiCtrlSibId sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_button(VuiCtrlSibId sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_text_button(sib_id, text, styles) vui_text_button_(sib_id, text, strlen(text), styles)
-extern VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
-extern VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_image_text_button(sib_id, image_id, image_tint, text, styles) vui_image_text_button_(sib_id, image_id, image_tint, text, strlen(text), styles)
-extern VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1122,13 +1082,13 @@ extern VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId imag
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-extern VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_toggle_button_start(VuiCtrlSibId sib_id, VuiBool* pressed, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 void vui_toggle_button_end();
 #define vui_text_toggle_button(sib_id, pressed, text, styles) vui_text_toggle_button_(sib_id, pressed, text, strlen(text), styles)
-extern VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_image_text_toggle_button(sib_id, pressed, image_id, image_tint, text, styles) vui_image_text_toggle_button_(sib_id, pressed, image_id, image_tint, text, strlen(text), styles)
-extern VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1171,14 +1131,14 @@ extern VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* press
 //     // do something with enum_value
 // }
 //
-extern VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_select_button_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 extern void vui_select_button_end();
 #define vui_text_select_button(sib_id, selected_sib_id, text, styles) vui_text_select_button_(sib_id, selected_sib_id, text, strlen(text), styles)
-extern VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_image_text_select_button(sib_id, selected_sib_id, image_id, image_tint, text, styles) \
 	vui_image_text_select_button_(sib_id, selected_sib_id, image_id, image_tint, text, strlen(text), styles)
-extern VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1194,10 +1154,10 @@ extern VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* 
 // @param image_id, image_tint: see vui_image
 //
 //
-extern VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_text_check_box(sib_id, checked, text, styles) vui_text_check_box_(sib_id, checked, text, strlen(text), styles)
-extern VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCheckBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1212,10 +1172,10 @@ extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiIma
 // @param text, text_length: see vui_text
 // @param image_id, image_tint: see vui_image
 //
-extern VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 #define vui_text_radio_button(sib_id, selected_sib_id, text, styles) vui_text_radio_button_(sib_id, selected_sib_id, text, strlen(text), styles)
-extern VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiRadioButtonStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1227,9 +1187,9 @@ extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 // @param value_out: a pointer to the value to be manipulated.
 //               the value will start at @param(min) and end at @param(max).
 //
-extern void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiSliderStyle* style);
-extern void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiSliderStyle* style);
-extern void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiSliderStyle* style);
+extern void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1241,7 +1201,7 @@ extern void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, f
 // @param value: the value used to calculate the size of the progress meter.
 //               the value will start at @param(min) and end at @param(max).
 //
-extern void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiProgressBarStyle* style);
+extern void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1256,10 +1216,10 @@ extern void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float 
 //
 // @param value: the pointer to the value that will be presented in the text box and written back out when modified.
 //
-extern VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_uint(VuiCtrlSibId sib_id, uint32_t* value, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_sint(VuiCtrlSibId sib_id, int32_t* value, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_input_box_float(VuiCtrlSibId sib_id, float* value, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 typedef VuiCtrlFlags VuiScrollFlags;
 //
@@ -1315,15 +1275,15 @@ enum {
 // for vui_text_box_multiline see vui_text_box for more documentation.
 //
 #define vui_scroll_view_start(sib_id, flags, style) vui_scroll_view_start_(sib_id, NULL, NULL, flags, style)
-extern void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiScrollViewStyle* style);
+extern void vui_scroll_view_start_(VuiCtrlSibId sib_id, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 extern void vui_scroll_view_end();
 #define vui_text_box_multiline(sib_id, string_in_out, string_in_out_cap, flags, style) vui_text_box_multiline_(sib_id, string_in_out, string_in_out_cap, NULL, NULL, flags, style)
-extern VuiBool vui_text_box_multiline_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiTextBoxStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_text_box_multiline_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 /*
 
-VuiBool vui_drag_button(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiButtonStyle* style);
-void vui_drag_button_start(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiButtonStyle* style);
+VuiBool vui_drag_button(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiCtrlStyle* style);
+void vui_drag_button_start(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiCtrlStyle* style);
 // returns true when being held or has been pressed on this frame
 VuiBool vui_drag_button_end(Vui* vui);
 */
@@ -1381,7 +1341,7 @@ typedef struct {
 
 extern VuiBool vui_init(VuiSetup* setup);
 
-extern void vui_frame_start(VuiBool right_to_left);
+extern void vui_frame_start(VuiBool right_to_left, float dt);
 extern void vui_frame_end();
 
 extern void vui_window_start(VuiWindowId id, VuiVec2 size);

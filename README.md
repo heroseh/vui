@@ -13,7 +13,7 @@ Inspired by (in no particular order):
 # Features
 - No dependencies (expect libc)
 	- But requires hooking up to sub systems of your application. See the **backends** directory.
-- Basic Controls (Buttons, Check Box, Radio Button, Progress Bar, Text Box, Input Box, Scroll View)
+- Basic Controls (Buttons, Check Box, Radio Button, Progress Bar, Text Box, Input Box, Scroll View, Sliders, Multi Line Text Box)
 - Advance Layout System
 	- Controls can be offset and aligned to the center, each edge or each corner
 	- Automatic, Fill Parent and Fill Ratio of Parent sizing.
@@ -24,6 +24,7 @@ Inspired by (in no particular order):
 - Handles the Input, Layout and Rendering the UI to an array of draw calls
 	- Draw calls have a texture, vertices and indices that you send directly to a graphics library like OpenGL
 - Can be used for Games and Applications (We still need to have some examples of these)
+- Style Animations
 
 # Aims
 - C99 Compatibility
@@ -31,9 +32,8 @@ Inspired by (in no particular order):
 	- The library itself has been written in a cross platform way. We just need to test and correct.
 - Stable Internal API to create custom controls
 	- This is possible right now but the API will break a little.
-- Style Animations
 - Good Examples & Documentation
-- A Complete Set of Controls (Drop Down Box, Multi Line Text Box, Panels, Tables, Graphs etc)
+- A Complete Set of Controls (Drop Down Box, Panels, Tables, Graphs etc)
 
 # Usage
 
