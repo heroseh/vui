@@ -1173,7 +1173,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = 0.f,
 		},
 		[VuiCtrlState_focused] = {
 			.margin = vui_margin_default,
@@ -1185,7 +1186,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = vui_check_size_focused_default,
 		},
 		[VuiCtrlState_active] = {
 			.margin = vui_margin_default,
@@ -1197,7 +1199,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = vui_check_size_active_default,
 		},
 		[VuiCtrlState_disabled] = {
 			.margin = vui_margin_default,
@@ -1209,7 +1212,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = 0.f,
 		},
 	},
 	.radio_button = {
@@ -1223,7 +1227,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = 0.f,
 		},
 		[VuiCtrlState_focused] = {
 			.margin = vui_margin_default,
@@ -1235,7 +1240,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = vui_check_size_focused_default,
 		},
 		[VuiCtrlState_active] = {
 			.margin = vui_margin_default,
@@ -1247,7 +1253,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = vui_check_size_active_default,
 		},
 		[VuiCtrlState_disabled] = {
 			.margin = vui_margin_default,
@@ -1259,7 +1266,8 @@ VuiStyleSheet vui_ss = {
 			.text_styles = vui_ss.text_menu,
 			.image_styles = vui_ss.image,
 			.check_color = vui_color_amethyst,
-			.check_size = vui_check_size_default,
+			.check_box_size = vui_check_box_size_default,
+			.check_size = 0.f,
 		},
 	},
 	.text_box = {
@@ -2033,7 +2041,7 @@ void VuiText_render(VuiCtrl* ctrl, const VuiCtrlStyle* styles, VuiRect* content_
 void VuiCheckBoxCheck_render(VuiCtrl* ctrl, const VuiCtrlStyle* _styles, VuiRect* content_rect) {
 	VuiCtrl* parent = vui_ctrl_get(ctrl->parent_id);
 	VuiBool is_active = (parent->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
-	if (is_active)
+	if (content_rect->left != content_rect->right)
 		vui_render_rect(content_rect, parent->style.check_color, parent->style.radius);
 }
 
@@ -2559,22 +2567,24 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 
 VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
 	VuiBool is_active = vui_false;
-	vui_scope_width(vui_auto_len)
-	vui_scope_height(vui_auto_len) {
-		vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0, styles, NULL);
-		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
-		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
-		if (checked) *checked = is_active;
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_toggleable, checked ? *checked + 1 : 0, styles, NULL);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	const VuiCtrlStyle* style = &ctrl->style;
+	ctrl->attributes.width = style->check_box_size;
+	ctrl->attributes.height = style->check_box_size;
 
-		vui_scope_width(ctrl->style.check_size)
-		vui_scope_height(ctrl->style.check_size) {
-			vui_ctrl_start_(vui_sib_id, 0, 0, NULL, VuiCheckBoxCheck_render);
-			vui_ctrl_end();
-		}
+	is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
+	if (checked) *checked = is_active;
 
+	vui_scope_align(VuiAlign_center)
+	vui_scope_width(style->check_size)
+	vui_scope_height(style->check_size) {
+		vui_ctrl_start_(vui_sib_id, 0, 0, NULL, VuiCheckBoxCheck_render);
 		vui_ctrl_end();
 	}
+
+	vui_ctrl_end();
 	return is_active;
 }
 
@@ -2646,23 +2656,23 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 
 VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
 	VuiBool is_active = vui_false;
-	vui_scope_width(vui_auto_len)
-	vui_scope_height(vui_auto_len) {
-		vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, styles, NULL);
-		VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	vui_ctrl_start_(sib_id, VuiCtrlFlags_focusable | VuiCtrlFlags_selectable, (*selected_sib_id == sib_id) + 1, styles, NULL);
+	VuiCtrl* ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
+	const VuiCtrlStyle* style = &ctrl->style;
+	ctrl->attributes.width = style->check_box_size;
+	ctrl->attributes.height = style->check_box_size;
 
-		is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
-		if (is_active) *selected_sib_id = sib_id;
+	is_active = (ctrl->state_flags & VuiCtrlStateFlags_active) == VuiCtrlStateFlags_active;
+	if (is_active) *selected_sib_id = sib_id;
 
-		vui_scope_width(ctrl->style.check_size)
-		vui_scope_height(ctrl->style.check_size) {
-			vui_ctrl_start_(vui_sib_id, 0, 0, NULL, VuiCheckBoxCheck_render);
-			vui_ctrl_end();
-		}
-
-
+	vui_scope_width(style->check_size)
+	vui_scope_height(style->check_size) {
+		vui_ctrl_start_(vui_sib_id, 0, 0, NULL, VuiCheckBoxCheck_render);
 		vui_ctrl_end();
 	}
+
+
+	vui_ctrl_end();
 	return is_active;
 }
 

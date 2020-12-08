@@ -733,7 +733,10 @@ struct VuiCtrlStyle {
 			float button_width;
 		};
 		float text_line_height;
-		float check_size;
+		struct {
+			float check_box_size;
+			float check_size;
+		};
 		float slider_width;
 		float cursor_width;
 		float separator_size;
@@ -823,7 +826,9 @@ struct VuiCtrl {
 #define vui_line_height_menu 24.f
 #define vui_scroll_bar_width_default 18.f
 #define vui_separator_size_default 4.f
-#define vui_check_size_default 20.f
+#define vui_check_box_size_default 32.f
+#define vui_check_size_focused_default 8.f
+#define vui_check_size_active_default 20.f
 #define vui_cursor_width_default 2.f
 #define vui_slider_bar_height_default 16.f
 #define vui_slider_button_width_default 32.f
