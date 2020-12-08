@@ -87,6 +87,7 @@ struct App {
 App app;
 
 void build_ui() {
+
 	vui_frame_start(vui_false, app.dt);
 
 	vui_window_start(0, VuiVec2_init(screen_width, screen_height));
@@ -100,17 +101,14 @@ void build_ui() {
 
 	vui_row_layout();
 	vui_scope_style_transition_time(250.0) {
-
 		vui_text(vui_sib_id, "Buttons", 0.f, vui_ss.text_header);
 		vui_separator(vui_sib_id, vui_ss.separator);
 		vui_scope_ctrl(vui_sib_id, NULL) {
 			vui_column_layout();
 
-			{
-				VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
-				vui_image_button(vui_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
-				vui_image_text_button(vui_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
-			}
+			VuiFocusState state = vui_text_button(vui_sib_id, "Button 1", vui_ss.button_action);
+			vui_image_button(vui_sib_id, app.images[3], VuiColor_white, vui_ss.button_action);
+			vui_image_text_button(vui_sib_id, app.images[3], VuiColor_white, "Button 3", vui_ss.button_action);
 		}
 
 		vui_text(vui_sib_id, "Toggle Buttons", 0.f, vui_ss.text_header);
@@ -410,6 +408,57 @@ VuiGlyphTextureId vui_stbtt_get_styled_glyph_texture_id(VuiFontId font_id, float
 	}
 }
 
+static void app_button_animate_fn(VuiCtrl* ctrl, float dt, float interp_ratio, VuiBool changed_this_frame) {
+	//
+	// this example shows off adding extra animations between two different control states
+	//
+
+	if (interp_ratio == 1.f)
+		return;
+
+	if (changed_this_frame) {
+		ctrl->animate_aux.pos = vui_mouse_pos();
+	}
+
+	if (ctrl->prev_state != VuiCtrlState_active && ctrl->state == VuiCtrlState_active) {
+		float radius = vui_lerp(25.f, 0.f, interp_ratio);
+		vui_render_circle(ctrl->animate_aux.pos, radius, ctrl->styles[ctrl->state].bg_color);
+	} else if (ctrl->prev_state == VuiCtrlState_active && ctrl->state != VuiCtrlState_active) {
+		float radius = vui_lerp(0.f, 25.f, interp_ratio);
+		vui_render_circle(ctrl->animate_aux.pos, radius, ctrl->styles[ctrl->state].bg_color);
+	}
+}
+
+static void app_progress_bar_animate_fn(VuiCtrl* ctrl, float dt, float interp_ratio, VuiBool changed_this_frame) {
+	//
+	// this example shows off adding extra animations that constantly persist
+	//
+	VuiCtrl* inner_bar_ctrl = vui_ctrl_get(ctrl->child_first_id);
+	VuiVec2 size = VuiVec2_init(6.f, VuiRect_height(&inner_bar_ctrl->rect));
+
+	float max = VuiRect_width(&inner_bar_ctrl->rect);
+	if (max < 30.f) {
+		ctrl->animate_aux.pos.x = 0.f;
+		return;
+	}
+
+	float speed = 0.1f;
+
+	ctrl->animate_aux.pos.x += speed * dt;
+	if (ctrl->animate_aux.pos.x + size.x > max) {
+		ctrl->animate_aux.pos.x = 0.f;
+	}
+
+	VuiRect rect;
+	rect.left_top = VuiVec2_add(inner_bar_ctrl->rect.left_top, ctrl->animate_aux.pos);
+	rect.right_bottom = VuiVec2_add(rect.left_top, size);
+
+	VuiColor color = VuiColor_white;
+	color.a = 0x40;
+
+	vui_render_rect(&rect, color, ctrl->styles[ctrl->state].radius);
+}
+
 void App_init() {
 	//
 	// initialize SDL with OpenGL 3.3 Core Profile
@@ -465,6 +514,8 @@ void App_init() {
 		.default_font_id = app.default_font_id,
 	};
 	vui_assert(vui_init(&setup), "failed to initialize vui");
+	vui_ss.button_action[0].pre_animate_fn = app_button_animate_fn;
+	vui_ss.progress_bar[0].post_animate_fn = app_progress_bar_animate_fn;
 
 	//
 	// precompute the glyph texture for all the visible ascii characters for the two font sizes VUI uses by default.

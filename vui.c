@@ -747,6 +747,10 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 //
 // ===========================================================================================
 
+VuiVec2 VuiRect_center(const VuiRect* r) {
+	return VuiVec2_add(r->left_top, VuiVec2_scale(VuiRect_size(*r), 0.5));
+}
+
 VuiRect VuiRect_clip(const VuiRect* a, const VuiRect* b) {
     if (
         a->left_top.x >= b->right_bottom.x || a->left_top.y >= b->right_bottom.y ||
@@ -930,6 +934,10 @@ void vui_input_add_text(const char* string, uint32_t string_length) {
 	}
 
 	_vui.input.focused_text_box.string[_vui.input.focused_text_box.string_len] = '\0';
+}
+
+VuiVec2 vui_mouse_pos() {
+	return VuiVec2_init(_vui.input.mouse.x, _vui.input.mouse.y);
 }
 
 VuiBool vui_has_mouse_over_ctrl() {
@@ -2279,10 +2287,12 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 	}
 
 	if (state != ctrl->state) {
+		ctrl->prev_state = ctrl->state;
 		ctrl->state = state;
 		ctrl->state_time = 0.f;
 		if (ctrl->attributes.style_transition_time) {
 			ctrl->prev_style = ctrl->style;
+			ctrl->prev_animate_aux = ctrl->animate_aux;
 		}
 	}
 
@@ -4844,6 +4854,14 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 		ctrl->render_fn(ctrl, style, &inner_rect);
 	}
 
+	if (ctrl->styles && ctrl->styles[0].pre_animate_fn) {
+		float interp_ratio = 1.0;
+		if (ctrl->state_time < ctrl->attributes.style_transition_time) {
+			interp_ratio = ctrl->state_time / ctrl->attributes.style_transition_time;
+		}
+		ctrl->styles[0].pre_animate_fn(ctrl, _vui.build.dt, interp_ratio, ctrl->state_time == _vui.build.dt);
+	}
+
 	//
 	// now render the children;
 	//
@@ -4851,6 +4869,14 @@ void _vui_render_ctrls(VuiCtrl* ctrl) {
 	for (VuiCtrlId child_id = ctrl->child_first_id; child_id; child_id = child->sibling_next_id) {
 		child = vui_ctrl_get(child_id);
 		_vui_render_ctrls(child);
+	}
+
+	if (ctrl->styles && ctrl->styles[0].post_animate_fn) {
+		float interp_ratio = 1.0;
+		if (ctrl->state_time < ctrl->attributes.style_transition_time) {
+			interp_ratio = ctrl->state_time / ctrl->attributes.style_transition_time;
+		}
+		ctrl->styles[0].post_animate_fn(ctrl, _vui.build.dt, interp_ratio, ctrl->state_time == _vui.build.dt);
 	}
 
 	_vui.render.clip_rect = parent_clip_rect;

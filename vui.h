@@ -68,6 +68,10 @@
 #define VuiCtrlStyleUserExt_lerp(dst, to, from, interp_ratio)
 #endif
 
+#ifndef inline_VuiCtrlAnimateAuxUserExt
+#define inline_VuiCtrlAnimateAuxUserExt
+#endif
+
 //
 // you can redefine these macros to supply your own custom memory allocation
 #if !defined(vui_mem_alloc)
@@ -397,6 +401,7 @@ static inline void VuiThickness_lerp(VuiThickness* result, const VuiThickness* t
 static inline float VuiRect_width(const VuiRect* rect) { return rect->right - rect->left; }
 static inline float VuiRect_neg_width(const VuiRect* rect) { return rect->left - rect->right; }
 static inline float VuiRect_height(const VuiRect* rect) { return rect->bottom - rect->top; }
+VuiVec2 VuiRect_center(const VuiRect* r);
 VuiRect VuiRect_clip(const VuiRect* a, const VuiRect* b);
 VuiVec2 VuiRect_clip_pt(const VuiRect* rect, VuiVec2 pt);
 VuiBool VuiRect_intersects(const VuiRect* a, const VuiRect* b);
@@ -503,9 +508,10 @@ void vui_input_set_mouse_button_released(VuiMouseButtons buttons);
 void vui_input_add_actions(VuiInputActions actions);
 void vui_input_add_text(const char* string, uint32_t string_length);
 
-VuiBool vui_input_is_mouse_over_ctrl();
-VuiBool vui_input_is_mouse_scroll_focused_ctrl();
-VuiBool vui_input_is_mouse_focused_ctrl();
+VuiVec2 vui_mouse_pos();
+VuiBool vui_has_mouse_over_ctrl();
+VuiBool vui_has_mouse_focused_ctrl();
+VuiBool vui_has_mouse_scroll_focused_ctrl();
 
 VuiBool vui_ctrl_is_mouse_focused(VuiCtrlId ctrl_id);
 VuiBool vui_ctrl_is_focused(VuiCtrlId ctrl_id);
@@ -695,6 +701,7 @@ enum {
 	VuiCtrlFlags_focusable_no_keyboard_focus_nav = 0x2000,
 	_VuiCtrlFlags_show_vertical_bar = 0x4000,
 	_VuiCtrlFlags_show_horizontal_bar = 0x8000,
+	_VuiCtrlFlags_is_new = 0x10000,
 };
 
 typedef uint8_t VuiLayoutType;
@@ -705,6 +712,8 @@ enum {
 };
 extern char* VuiLayoutType_strings[];
 
+typedef struct VuiCtrl VuiCtrl;
+typedef void (*VuiCtrlStyleAnimateFn)(VuiCtrl* ctrl, float dt, float interp_ratio, VuiBool changed_this_frame);
 typedef struct VuiCtrlStyle VuiCtrlStyle;
 struct VuiCtrlStyle {
 	VuiThickness margin;
@@ -744,6 +753,8 @@ struct VuiCtrlStyle {
 	};
 
 	VuiFontId font_id;
+	VuiCtrlStyleAnimateFn pre_animate_fn;
+	VuiCtrlStyleAnimateFn post_animate_fn;
 	union {
 		//
 		// all of these styles points to an array of styles, one for for each VuiCtrlState value
@@ -765,7 +776,15 @@ struct VuiCtrlStyle {
 	inline_VuiCtrlStyleUserExt;
 };
 
-typedef struct VuiCtrl VuiCtrl;
+typedef struct VuiCtrlAnimateAux VuiCtrlAnimateAux;
+struct VuiCtrlAnimateAux {
+	VuiVec2 pos;
+	float radius;
+	VuiVec2 size;
+
+	inline_VuiCtrlAnimateAuxUserExt;
+};
+
 typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, const VuiCtrlStyle* styles, VuiRect* content_rect);
 struct VuiCtrl {
 	VuiCtrlId id;
@@ -807,6 +826,10 @@ struct VuiCtrl {
 			VuiVec2 scroll_view_size;
 		};
 	};
+
+	VuiCtrlAnimateAux prev_animate_aux;
+	VuiCtrlAnimateAux animate_aux;
+
 	VuiCtrlAttrs attributes;
 };
 
