@@ -459,6 +459,11 @@ static void app_progress_bar_animate_fn(VuiCtrl* ctrl, float dt, float interp_ra
 	vui_render_rect(&rect, color, ctrl->styles[ctrl->state].radius);
 }
 
+void App_resize(uint32_t w, uint32_t h) {
+	mat4x4_ortho(app.opengl.projection, 0.f, w, h, 0.f, 1.f, 0.f);
+	glViewport(0, 0, w, h);
+}
+
 void App_init() {
 	//
 	// initialize SDL with OpenGL 3.3 Core Profile
@@ -609,6 +614,8 @@ void App_init() {
 		opengl_texture_set_pixels(app.opengl.tex_image, GL_RGBA, GL_RGB, 256, 256, color_plane_pixels);
 	}
 
+	App_resize(screen_width, screen_height);
+
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -667,8 +674,7 @@ int main(int argc, char** argv) {
 				case SDL_WINDOWEVENT: {
 					switch (event.window.event) {
 						case SDL_WINDOWEVENT_RESIZED:
-							mat4x4_ortho(app.opengl.projection, 0.f, event.window.data1, event.window.data2, 0.f, 1.f, 0.f);
-							glViewport(0, 0, event.window.data1, event.window.data2);
+							App_resize(event.window.data1, event.window.data2);
 							break;
 					}
 					break;
