@@ -525,7 +525,8 @@ void vui_stbtt_render_glyph(VuiVec2 baseline_pos, VuiFontId font_id, float line_
 	//
 	// get the styled glyph from the glyph texture's internal list
 	uint32_t styled_glyph_id = _vui_stbtt_find_styled_glyph_id(tex, font_id, line_height, stb_glyph_idx);
-	vui_assert(styled_glyph_id, "unable to find codepoint '%lc' with a line_height of '%f' and a font_id of '%u'", codept, line_height, font_id);
+	uint32_t rects_count = VuiStk_count(tex->styled_glyph_rects);
+	vui_assert(styled_glyph_id && styled_glyph_id <= rects_count, "unable to find codepoint '%lc' with a line_height of '%f' and a font_id of '%u'", codept, line_height, font_id);
 	_VuiStbttStyledGlyphRect* gr = &tex->styled_glyph_rects[styled_glyph_id - 1];
 
 	//

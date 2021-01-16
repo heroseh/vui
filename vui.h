@@ -15,8 +15,7 @@
 //
 // ===========================================================================================
 
-#define VUI_DEBUG_ASSERTIONS 0
-#define VUI_DEBUG_CTRL_LAYOUT 1
+#define VUI_DEBUG_CTRL_LAYOUT 0
 
 #define vui_debug_ctrl_layout_dump_file_path "/tmp/vui_ctrls"
 #define vui_text_box_select_scroll_amount 4.0f
@@ -220,6 +219,8 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 // returns true if the stack has reached its maximum capacity, if stk is null returns true
 #define VuiStk_is_full(stk) (VuiStk_count(stk) == VuiStk_cap(stk))
 
+#define VuiStk_pop(stk) (_VuiStk_header(stk)->count -= 1)
+
 //
 // reallocates the stack to hold @param(new_cap) number of elements.
 //
@@ -307,20 +308,36 @@ static inline VuiVec2 VuiVec2_add(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.
 static inline VuiVec2 VuiVec2_sub(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x - b.x, a.y - b.y); }
 static inline VuiVec2 VuiVec2_mul(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x * b.x, a.y * b.y); }
 static inline VuiVec2 VuiVec2_div(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(a.x / b.x, a.y / b.y); }
+static inline VuiVec2 VuiVec2_add_scalar(VuiVec2 v, float by) { return VuiVec2_init(v.x + by, v.y + by); }
+static inline VuiVec2 VuiVec2_sub_scalar(VuiVec2 v, float by) { return VuiVec2_init(v.x - by, v.y - by); }
+static inline VuiVec2 VuiVec2_mul_scalar(VuiVec2 v, float by) { return VuiVec2_init(v.x * by, v.y * by); }
+static inline VuiVec2 VuiVec2_div_scalar(VuiVec2 v, float by) { return VuiVec2_init(v.x / by, v.y / by); }
 static inline VuiVec2 VuiVec2_neg(VuiVec2 v) { return VuiVec2_init(-v.x, -v.y); }
+static inline VuiVec2 VuiVec2_abs(VuiVec2 v) { return VuiVec2_init(fabsf(v.x), fabsf(v.y)); }
 static inline float VuiVec2_len(VuiVec2 v) { return sqrtf((v.x * v.x) + (v.y * v.y)); }
-static inline VuiVec2 VuiVec2_scale(VuiVec2 v, float by) { return VuiVec2_init(v.x * by, v.y * by); }
 static inline VuiVec2 VuiVec2_norm(VuiVec2 v) {
-	float d = sqrtf((v.x * v.x) + (v.y * v.y));
-	float k = d == 0.0 ? 0.0 : 1.0 / d;
+	if (v.x == 0 && v.y == 0) return v;
+	float k = 1.0 / sqrtf((v.x * v.x) + (v.y * v.y));
 	return VuiVec2_init(v.x * k, v.y * k);
 }
+
+static inline float VuiVec2_dot(VuiVec2 a, VuiVec2 b) {
+	float p = 0.0;
+	p += a.x * b.x;
+	p += a.y * b.y;
+	return p;
+}
+
+static inline VuiVec2 VuiVec2_mul_cross_scalar(VuiVec2 v, float s) { return VuiVec2_init(v.y * s, v.x * s); }
+static inline float VuiVec2_mul_cross_vec(VuiVec2 a, VuiVec2 b) { return (a.x * b.y) - (a.y * b.x); }
 static inline VuiVec2 VuiVec2_perp_left(VuiVec2 v) { return VuiVec2_init(v.y, -v.x); }
 static inline VuiVec2 VuiVec2_perp_right(VuiVec2 v) { return VuiVec2_init(-v.y, v.x); }
 
 static inline VuiVec2 VuiVec2_min(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(vui_min(a.x, b.x), vui_min(a.y, b.y)); }
 static inline VuiVec2 VuiVec2_max(VuiVec2 a, VuiVec2 b) { return VuiVec2_init(vui_max(a.x, b.x), vui_max(a.y, b.y)); }
 static inline VuiVec2 VuiVec2_clamp(VuiVec2 v, VuiVec2 min, VuiVec2 max) { return VuiVec2_init(vui_clamp(v.x, min.x, max.x), vui_clamp(v.y, min.y, max.y)); }
+static inline float VuiVec2_x(VuiVec2 v) { return v.x; }
+static inline float VuiVec2_y(VuiVec2 v) { return v.y; }
 
 typedef struct VuiColor VuiColor;
 struct VuiColor {
@@ -512,6 +529,7 @@ VuiVec2 vui_mouse_pos();
 VuiBool vui_has_mouse_over_ctrl();
 VuiBool vui_has_mouse_focused_ctrl();
 VuiBool vui_has_mouse_scroll_focused_ctrl();
+VuiBool vui_has_text_box_focused();
 
 VuiBool vui_ctrl_is_mouse_focused(VuiCtrlId ctrl_id);
 VuiBool vui_ctrl_is_focused(VuiCtrlId ctrl_id);
@@ -537,6 +555,7 @@ enum {
 	VuiAlign_right_top,
 	VuiAlign_right_center,
 	VuiAlign_right_bottom,
+	VuiAlign_COUNT,
 };
 
 typedef uint8_t VuiImageScaleMode;
@@ -609,6 +628,10 @@ enum {
 	VuiCtrlStateFlags_active = 1 << VuiCtrlState_active,
 	VuiCtrlStateFlags_disabled = 1 << VuiCtrlState_disabled,
 };
+
+extern void vui_push_disabled(VuiBool enabled);
+extern void vui_pop_disabled();
+#define vui_scope_disabled(enabled) _vui_defer_loop(vui_push_disabled(enabled), vui_pop_disabled())
 
 //
 // push and pop attributes for a given control state that override the global style
@@ -702,6 +725,10 @@ enum {
 	_VuiCtrlFlags_show_vertical_bar = 0x4000,
 	_VuiCtrlFlags_show_horizontal_bar = 0x8000,
 	_VuiCtrlFlags_is_new = 0x10000,
+	_VuiCtrlFlags_is_popover = 0x20000,
+	_VuiCtrlFlags_is_laid_out = 0x40000,
+	_VuiCtrlFlags_is_popover_open = 0x80000,
+	_VuiCtrlFlags_is_canvas = 0x100000,
 };
 
 typedef uint8_t VuiLayoutType;
@@ -785,7 +812,67 @@ struct VuiCtrlAnimateAux {
 	inline_VuiCtrlAnimateAuxUserExt;
 };
 
-typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, const VuiCtrlStyle* styles, VuiRect* content_rect);
+typedef uint8_t VuiCanvasItemType;
+enum VuiCanvasItemType {
+	VuiCanvasItemType_line,
+	VuiCanvasItemType_line_dotted,
+	VuiCanvasItemType_line_dashed,
+	VuiCanvasItemType_rect,
+	VuiCanvasItemType_rect_border,
+	VuiCanvasItemType_circle,
+	VuiCanvasItemType_circle_border,
+	VuiCanvasItemType_triangle,
+	VuiCanvasItemType_triangle_border,
+	VuiCanvasItemType_bezier_curve,
+};
+
+typedef struct VuiCanvasItem VuiCanvasItem;
+struct VuiCanvasItem {
+	union {
+		struct {
+			VuiVec2 start_pos;
+			VuiVec2 end_pos;
+			float width;
+		} line;
+		struct {
+			VuiVec2 start_pos;
+			VuiVec2 end_pos;
+			float width;
+			float gap;
+		} line_dotted;
+		struct {
+			VuiVec2 start_pos;
+			VuiVec2 end_pos;
+			float width;
+			float dash_length;
+			float gap;
+		} line_dashed;
+		struct {
+			VuiRect rect;
+			float radius;
+			float width;
+		} rect;
+		struct {
+			VuiVec2 pos;
+			float radius;
+			float width;
+		} circle;
+		struct {
+			VuiVec2 a;
+			VuiVec2 b;
+			VuiVec2 c;
+			float width;
+		} triangle;
+		struct {
+			VuiVec2 points[4];
+			float width;
+		} bezier_curve;
+	};
+	VuiColor color;
+	VuiCanvasItemType type;
+};
+
+typedef void (*VuiCtrlRenderFn)(VuiCtrl* ctrl, VuiRect* content_rect, float interp_ratio);
 struct VuiCtrl {
 	VuiCtrlId id;
 	VuiCtrlId parent_id;
@@ -825,6 +912,11 @@ struct VuiCtrl {
 		struct {
 			VuiVec2 scroll_view_size;
 		};
+		struct {
+			VuiCtrlId popover_target_ctrl_id;
+			VuiBool* popover_is_open_ptr;
+		};
+		VuiStk(VuiCanvasItem) canvas_items;
 	};
 
 	VuiCtrlAnimateAux prev_animate_aux;
@@ -841,20 +933,62 @@ struct VuiCtrl {
 //
 // ===========================================================================================
 
+#ifndef vui_margin_default
 #define vui_margin_default VuiThickness_init_even(4.f)
+#endif
+
+#ifndef vui_padding_default
 #define vui_padding_default VuiThickness_init_even(4.f)
+#endif
+
+#ifndef vui_border_width_default
 #define vui_border_width_default 2.f
+#endif
+
+#ifndef vui_radius_default
 #define vui_radius_default 4.f
+#endif
+
+#ifndef vui_line_height_header
 #define vui_line_height_header 32.f
+#endif
+
+#ifndef vui_line_height_menu
 #define vui_line_height_menu 24.f
+#endif
+
+#ifndef vui_scroll_bar_width_default
 #define vui_scroll_bar_width_default 18.f
+#endif
+
+#ifndef vui_separator_size_default
 #define vui_separator_size_default 4.f
+#endif
+
+#ifndef vui_check_box_size_default
 #define vui_check_box_size_default 32.f
+#endif
+
+#ifndef vui_check_size_focused_default
 #define vui_check_size_focused_default 8.f
+#endif
+
+#ifndef vui_check_size_active_default
 #define vui_check_size_active_default 20.f
+#endif
+
+#ifndef vui_cursor_width_default
 #define vui_cursor_width_default 2.f
+#endif
+
+#ifndef vui_slider_bar_height_default
 #define vui_slider_bar_height_default 16.f
+#endif
+
+#ifndef vui_slider_button_width_default
 #define vui_slider_button_width_default 32.f
+#endif
+
 
 #define vui_color_white VuiColor_init(0xfa, 0xfa, 0xfa, 0xff)
 #define vui_color_gray VuiColor_init(0xbd, 0xbd, 0xbd, 0xff)
@@ -907,6 +1041,7 @@ typedef struct {
 	VuiCtrlStyle scroll_view[VuiCtrlState_COUNT];
 	VuiCtrlStyle scroll_bar[VuiCtrlState_COUNT];
 	VuiCtrlStyle scroll_bar_slider[VuiCtrlState_COUNT];
+	VuiCtrlStyle popover[VuiCtrlState_COUNT];
 } VuiStyleSheet;
 extern VuiStyleSheet vui_ss;
 
@@ -991,10 +1126,10 @@ extern void vui_render_circle_border(VuiVec2 pos, float radius, VuiColor color, 
 extern void vui_render_text(VuiVec2 pos, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width);
 extern void vui_render_polyline(VuiVec2* points, uint32_t points_count, VuiColor color, float width, VuiBool connect_first_and_last);
 extern void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
-extern void vui_render_bezier_curve(VuiVec2 start_pos, VuiVec2 end_pos, VuiVec2 start_anchor_pos, VuiVec2 end_anchor_pos, VuiColor color, float width);
+extern void vui_render_bezier_curve(VuiVec2 points[4], VuiColor color, float width);
 
-extern void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode);
-extern void vui_render_image_(const VuiRect* rect, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph);
+extern void vui_render_image(const VuiRect* rect, VuiImageId image_id, VuiColor image_tint, VuiImageScaleMode scale_mode, float scale);
+extern void vui_render_image_(const VuiRect* rect, float image_width, float image_height, VuiTextureId texture_id, VuiRect uv_rect, VuiColor color, VuiImageScaleMode scale_mode, VuiBool is_glyph, float scale);
 
 extern void vui_path_reset();
 extern void vui_path_plot_point(VuiVec2 pt);
@@ -1039,6 +1174,8 @@ enum {
 	VuiActiveChange_to_active = vui_true + 1,
 };
 
+extern VuiCtrlId vui_ctrl_get_id();
+extern VuiCtrlId vui_ctrl_get_prev_id();
 extern VuiCtrl* vui_ctrl_get(VuiCtrlId ctrl_id);
 extern VuiCtrl* vui_ctrl_try_get(VuiCtrlId ctrl_id);
 #define vui_ctrl_start(sib_id, styles) vui_ctrl_start_(sib_id, 0, 0, styles, NULL)
@@ -1183,9 +1320,13 @@ extern VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* 
 //
 //
 extern VuiBool vui_check_box(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_check_box_aux_start(VuiCtrlSibId sib_id, VuiBool* checked, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_check_box_aux_end();
 #define vui_text_check_box(sib_id, checked, text, styles) vui_text_check_box_(sib_id, checked, text, strlen(text), styles)
 extern VuiBool vui_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
-extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_image_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+#define vui_image_text_check_box(sib_id, checked, image_id, image_tint, text, styles) vui_image_text_check_box_(sib_id, checked, image_id, image_tint, text, strlen(text), styles)
+extern VuiBool vui_image_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1201,9 +1342,13 @@ extern VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiIma
 // @param image_id, image_tint: see vui_image
 //
 extern VuiBool vui_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_radio_button_aux_start(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_radio_button_aux_end();
 #define vui_text_radio_button(sib_id, selected_sib_id, text, styles) vui_text_radio_button_(sib_id, selected_sib_id, text, strlen(text), styles)
 extern VuiBool vui_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 extern VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+#define vui_image_text_radio_button(sib_id, selected_sib_id, image_id, image_tint, text, styles) vui_image_text_radio_button_(sib_id, selected_sib_id, image_id, image_tint, text, strlen(text), styles)
+extern VuiBool vui_image_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_id, VuiImageId image_id, VuiColor image_tint, char* text, uint32_t text_length, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
@@ -1308,13 +1453,49 @@ extern void vui_scroll_view_end();
 #define vui_text_box_multiline(sib_id, string_in_out, string_in_out_cap, flags, style) vui_text_box_multiline_(sib_id, string_in_out, string_in_out_cap, NULL, NULL, flags, style)
 extern VuiBool vui_text_box_multiline_(VuiCtrlSibId sib_id, char* string_in_out, uint32_t string_in_out_cap, VuiVec2* content_offset_in_out, VuiVec2* size_in_out, VuiScrollFlags flags, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
-/*
+// ====================================================================================
+//
+//
+// Popover
+//
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+// @param target_ctrl_id: the identifier of the control you wish to target
+//
+// @param is_open:
+//     if this parameter is NULL the popover is always rendered when this code executes.
+//         the popover cannot be closed by mouse clicks out side of the popover either.
+//     else if is_open is provided, the popover is rendered when *is_open is true and
+//         mouse clicks outside of the popover will close the popover and set *is_open to false.
+//
+extern void vui_popover_start(VuiCtrlSibId sib_id, VuiBool* is_open, VuiCtrlId target_ctrl_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_popover_end(void);
 
-VuiBool vui_drag_button(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiCtrlStyle* style);
-void vui_drag_button_start(Vui* vui, VuiCtrlSibId sib_id, VuiVec2 size, VuiCtrlStyle* style);
-// returns true when being held or has been pressed on this frame
-VuiBool vui_drag_button_end(Vui* vui);
-*/
+
+// ====================================================================================
+//
+//
+// Canvas
+//
+//
+// @param sib_id: the unique sibling identifier, see the vui_sib_id macro for more.
+//
+extern void vui_canvas_start(VuiCtrlSibId sib_id, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern void vui_canvas_end(void);
+
+extern void vui_canvas_line(VuiVec2 start_pos, VuiVec2 end_pos, VuiColor color, float width);
+extern void vui_canvas_line_dotted(VuiVec2 start_pos, VuiVec2 end_pos, VuiColor color, float width, float gap);
+extern void vui_canvas_line_dashed(VuiVec2 start_pos, VuiVec2 end_pos, VuiColor color, float width, float length, float gap);
+extern void vui_canvas_rect(const VuiRect* rect, VuiColor color, float radius);
+extern void vui_canvas_rect_border(const VuiRect* rect, VuiColor color, float radius, float width);
+extern void vui_canvas_triangle(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color);
+extern void vui_canvas_triangle_border(VuiVec2 a, VuiVec2 b, VuiVec2 c, VuiColor color, float width);
+extern void vui_canvas_circle(VuiVec2 pos, float radius, VuiColor color);
+extern void vui_canvas_circle_border(VuiVec2 pos, float radius, VuiColor color, float width);
+extern void vui_canvas_text(VuiVec2 pos, VuiFontId font_id, float line_height, char* text, uint32_t text_length, VuiColor color, float word_wrap_at_width);
+extern void vui_canvas_polyline(VuiVec2* points, uint32_t points_count, VuiColor color, float width, VuiBool connect_first_and_last);
+extern void vui_canvas_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor color);
+extern void vui_canvas_bezier_curve(VuiVec2 points[4], VuiColor color, float width);
 
 // ===========================================================================================
 //
@@ -1365,6 +1546,7 @@ typedef struct {
 	uint16_t windows_count;
 	void* allocator;
 	VuiFontId default_font_id;
+	uint32_t ctrls_init_cap;
 } VuiSetup;
 
 extern VuiBool vui_init(VuiSetup* setup);

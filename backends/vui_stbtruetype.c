@@ -149,7 +149,7 @@ RETURN_CURSOR_IDX_GO_BACK:
 					if (args->render_glyph_fn) {
 						//
 						// we have a render function, so it's time to render our glyph by calling back to VUI.
-						vui_stbtt_render_glyph(pos, args->font_id, args->line_height, codept, codept_glyph, vui_true, args->render_glyph_fn);
+						vui_stbtt_render_glyph(pos, args->font_id, args->line_height, codept, codept_glyph, vui_false, args->render_glyph_fn);
 					} else {
 						//
 						// call this user implemented function to keep track of what styled glyphs we have.
