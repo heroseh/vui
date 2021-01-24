@@ -662,6 +662,23 @@ VuiBool vui_utf8_is_whitespace(int32_t codept) {
 	return vui_false;
 }
 
+VuiVec2 vui_cubic_bezier_curve_interp(VuiVec2 points[4], float progress) {
+	VuiVec2 tmp_buf[4];
+	memcpy(tmp_buf, points, sizeof(VuiVec2) * 4);
+
+	size_t number_of_points = 4;
+	while (number_of_points > 1) {
+		for (size_t i = 0; i < number_of_points - 1; ++i) {
+			tmp_buf[i].x = vui_lerp(tmp_buf[i + 1].x, tmp_buf[i].x, progress);
+			tmp_buf[i].y = vui_lerp(tmp_buf[i + 1].y, tmp_buf[i].y, progress);
+
+		}
+		number_of_points -= 1;
+	}
+
+	return tmp_buf[0];
+}
+
 // ===========================================================================================
 //
 //
@@ -1799,36 +1816,19 @@ void vui_render_convex_polygon(VuiVec2* points, uint32_t points_count, VuiColor 
 	}
 }
 
-static VuiVec2 _vui_beziern_sample(VuiVec2 points[4], float progress) {
-	VuiVec2 tmp_buf[4];
-	memcpy(tmp_buf, points, sizeof(VuiVec2) * 4);
-
-	size_t number_of_points = 4;
-	while (number_of_points > 1) {
-		for (size_t i = 0; i < number_of_points - 1; ++i) {
-			tmp_buf[i].x = vui_lerp(tmp_buf[i + 1].x, tmp_buf[i].x, progress);
-			tmp_buf[i].y = vui_lerp(tmp_buf[i + 1].y, tmp_buf[i].y, progress);
-
-		}
-		number_of_points -= 1;
-	}
-
-	return tmp_buf[0];
-}
-
 void vui_render_bezier_curve(VuiVec2 points[4], VuiColor color, float width) {
 	float step = 0.01;
 
 	//
 	// create all the points from the start and just before the end
 	for (float progress = 0.0f; progress < 1.0f; progress += step) {
-		VuiVec2 point = _vui_beziern_sample(points, progress);
+		VuiVec2 point = vui_cubic_bezier_curve_interp(points, progress);
 		vui_path_plot_point(point);
 	}
 
 	//
 	// now finish the curve by plotting the last point dead at the end.
-	VuiVec2 point = _vui_beziern_sample(points, 1.0);
+	VuiVec2 point = vui_cubic_bezier_curve_interp(points, 1.0);
 	vui_path_plot_point(point);
 
 	vui_render_path_stroked(color, width, vui_false);
@@ -2229,8 +2229,16 @@ void _vui_ctrl_insert(VuiCtrl* ctrl) {
 		sib_prev->sibling_next_id = ctrl->id;
 	} else {
 		VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
-		parent->child_first_id = ctrl->id;
-		parent->child_last_id = ctrl->id;
+		if (parent->child_first_id) {
+			VuiCtrl* og_first = vui_ctrl_get(parent->child_first_id);
+			og_first->sibling_prev_id = ctrl->id;
+
+			ctrl->sibling_next_id = parent->child_first_id;
+			parent->child_first_id = ctrl->id;
+		} else {
+			parent->child_first_id = ctrl->id;
+			parent->child_last_id = ctrl->id;
+		}
 	}
 	ctrl->parent_id = _vui.build.parent_ctrl_id;
 }
@@ -2571,6 +2579,7 @@ void VuiTextBoxCursor_render(VuiCtrl* ctrl, VuiRect* content_rect, float interp_
 }
 
 void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange active_change, const VuiCtrlStyle styles[VuiCtrlState_COUNT], VuiCtrlRenderFn render_fn) {
+	vui_assert(sib_id, "A sibling identifier of 0 (NULL) cannot be used");
 	VuiCtrl* parent_ctrl = vui_ctrl_get(_vui.build.parent_ctrl_id);
 
 	//
@@ -2589,6 +2598,7 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 			_vui_ctrl_unlink(ctrl);
 			_vui_ctrl_insert(ctrl);
 		}
+		vui_assert(ctrl->last_frame_idx != _vui.build.frame_idx, "Found duplicate control sibling identifier of '%u'... these must be unique", sib_id);
 	} else {
 		//
 		// it does not exist, allocate a new one.
@@ -2794,7 +2804,8 @@ VuiFocusState vui_text_button_(VuiCtrlSibId sib_id, char* text, uint32_t text_le
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
 
@@ -2813,7 +2824,8 @@ VuiFocusState vui_image_button(VuiCtrlSibId sib_id, VuiImageId image_id, VuiColo
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 	}
 	vui_button_end();
@@ -2832,7 +2844,9 @@ VuiFocusState vui_image_text_button_(VuiCtrlSibId sib_id, VuiImageId image_id, V
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false)
+	{
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
@@ -2865,7 +2879,8 @@ VuiBool vui_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, char* tex
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
 	vui_toggle_button_end();
@@ -2883,7 +2898,8 @@ VuiBool vui_image_toggle_button(VuiCtrlSibId sib_id, VuiBool* pressed, VuiImageI
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 	}
 	vui_toggle_button_end();
@@ -2902,7 +2918,8 @@ VuiBool vui_image_text_toggle_button_(VuiCtrlSibId sib_id, VuiBool* pressed, Vui
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
@@ -2934,7 +2951,8 @@ VuiBool vui_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
 	vui_select_button_end();
@@ -2952,7 +2970,8 @@ VuiBool vui_image_select_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 	}
 	vui_select_button_end();
@@ -2971,7 +2990,8 @@ VuiBool vui_image_text_select_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selecte
 	vui_scope_width(vui_auto_len)
 	vui_scope_height(vui_auto_len)
 	vui_scope_offset(0.f, 0.f)
-	vui_scope_align(VuiAlign_center) {
+	vui_scope_align(VuiAlign_center)
+	vui_scope_disabled(vui_false) {
 		vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 		vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 	}
@@ -3058,6 +3078,7 @@ VuiBool vui_image_check_box(VuiCtrlSibId sib_id, VuiBool* checked, VuiImageId im
 	// the child styles are only in the VuiCtrlState_default style
 	const VuiCtrlStyle* style = &styles[0];
 
+	vui_scope_disabled(vui_false)
 	vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 
 	vui_check_box_aux_end();
@@ -3071,6 +3092,7 @@ VuiBool vui_image_text_check_box_(VuiCtrlSibId sib_id, VuiBool* checked, VuiImag
 	// the child styles are only in the VuiCtrlState_default style
 	const VuiCtrlStyle* style = &styles[0];
 
+	vui_scope_disabled(vui_false)
 	vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 	vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 
@@ -3150,6 +3172,7 @@ VuiBool vui_image_radio_button(VuiCtrlSibId sib_id, VuiCtrlSibId* selected_sib_i
 	// the child styles are only in the VuiCtrlState_default style
 	const VuiCtrlStyle* style = &styles[0];
 
+	vui_scope_disabled(vui_false)
 	vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 
 	vui_radio_button_aux_end();
@@ -3163,6 +3186,7 @@ VuiBool vui_image_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* selected
 	// the child styles are only in the VuiCtrlState_default style
 	const VuiCtrlStyle* style = &styles[0];
 
+	vui_scope_disabled(vui_false)
 	vui_image(vui_sib_id, image_id, image_tint, style->image_styles);
 	vui_text_(vui_sib_id, text, text_length, 0.f, style->text_styles);
 
@@ -3177,11 +3201,13 @@ enum {
 	_VuiSliderType_s32,
 };
 
-void _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, const VuiCtrlStyle styles[VuiCtrlState_COUNT], _VuiSliderType type) {
+// returns vui_true when the button has been released
+VuiBool _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, const VuiCtrlStyle styles[VuiCtrlState_COUNT], _VuiSliderType type) {
 	vui_scope_height(vui_auto_len)
 	vui_scope_layout_wrap(vui_false)
 	vui_ctrl_start_(sib_id, 0, 0, styles, NULL);
 
+	VuiBool released = vui_false;
 	vui_scope_align(VuiAlign_left_top) {
 		VuiCtrl* parent = vui_ctrl_get(_vui.build.parent_ctrl_id);
 		const VuiCtrlStyle* style = &parent->style;
@@ -3225,10 +3251,12 @@ void _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, con
 
 		//
 		// make the button and if it is held down, then modify the value.
+		VuiFocusState button_state;
 		vui_scope_offset(button_offset, bar_styles->margin.top - button_styles->margin.top)
 		vui_scope_width(style->button_width)
 		vui_scope_height(style->button_width)
-		if (vui_button(vui_sib_id, button_styles) & VuiFocusState_held) {
+		button_state = vui_button(vui_sib_id, button_styles);
+		if (button_state & VuiFocusState_held) {
 			bar = vui_ctrl_get(bar_ctrl_id);
 			float mouse_offset = _vui.input.mouse.x - bar->rect.left;
 			if (mouse_offset < 0.f) mouse_offset = 0.f;
@@ -3239,27 +3267,34 @@ void _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, con
 				case _VuiSliderType_s32: *(int32_t*)value_out =  (int32_t)roundf(value) + *(int32_t*)min; break;
 			}
 		}
+
+		released = (button_state & VuiFocusState_released) == VuiFocusState_released;
 	}
 
 	vui_ctrl_end();
+	return released;
 }
 
-void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
+VuiBool vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
 	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
-	_vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_u32);
+	VuiBool released = _vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_u32);
 	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+	return released;
 }
 
-void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
+VuiBool vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
+	int32_t og_value = *value_out;
 	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
-	_vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_s32);
+	VuiBool released = _vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_s32);
 	*value_out = *value_out < min ? min : (*value_out > max ? max : *value_out);
+	return released;
 }
 
-void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
+VuiBool vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
 	*value_out = vui_clamp(*value_out, min, max);
-	_vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_float);
+	VuiBool released = _vui_slider(sib_id, value_out, &min, &max, styles, _VuiSliderType_float);
 	*value_out = vui_clamp(*value_out, min, max);
+	return released;
 }
 
 void vui_progress_bar(VuiCtrlSibId sib_id, float value, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]) {
@@ -4073,6 +4108,9 @@ void _vui_find_mouse_focused_ctrls(VuiCtrl* ctrl, VuiBool is_root) {
 	VuiVec2 mouse_pt = VuiVec2_init(_vui.input.mouse.x, _vui.input.mouse.y);
 	VuiRect parent_clip_rect = _vui.render.clip_rect;
 	if (ctrl->flags & _VuiCtrlFlags_is_popover) {
+		if (!(ctrl->flags & _VuiCtrlFlags_is_popover_open))
+			return;
+
 		VuiCtrl* root_ctrl = vui_ctrl_get(_vui.build.w->root_ctrl_id);
 		_vui.render.clip_rect = VuiRect_init(0, 0, root_ctrl->attributes.width, root_ctrl->attributes.height);
 		if (_vui.input.mouse.buttons_has_been_pressed & VuiMouseButtons_left) {

@@ -162,6 +162,12 @@ VuiBool vui_utf8_is_codepoint_boundary(char ch);
 VuiBool vui_utf8_is_word_delimiter(int32_t codept);
 VuiBool vui_utf8_is_whitespace(int32_t codept);
 
+typedef struct {
+    float x;
+    float y;
+} VuiVec2;
+VuiVec2 vui_cubic_bezier_curve_interp(VuiVec2 points[4], float progress);
+
 // ===========================================================================================
 //
 //
@@ -294,11 +300,6 @@ void _VuiStk_remove_range_shift(void* stk, uint32_t start_idx, uint32_t end_idx,
 //
 //
 // ===========================================================================================
-
-typedef struct {
-    float x;
-    float y;
-} VuiVec2;
 
 #define VuiVec2_init(x, y) (VuiVec2){ x, y }
 #define VuiVec2_zero (VuiVec2){0}
@@ -1360,9 +1361,11 @@ extern VuiBool vui_image_text_radio_button_(VuiCtrlSibId sib_id, VuiCtrlSibId* s
 // @param value_out: a pointer to the value to be manipulated.
 //               the value will start at @param(min) and end at @param(max).
 //
-extern void vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
-extern void vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
-extern void vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+// @return: vui_true if the slider button has been released, otherwise vui_false.
+//
+extern VuiBool vui_slider_uint(VuiCtrlSibId sib_id, uint32_t* value_out, uint32_t min, uint32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_slider_sint(VuiCtrlSibId sib_id, int32_t* value_out, int32_t min, int32_t max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
+extern VuiBool vui_slider_float(VuiCtrlSibId sib_id, float* value_out, float min, float max, const VuiCtrlStyle styles[VuiCtrlState_COUNT]);
 
 // ====================================================================================
 //
