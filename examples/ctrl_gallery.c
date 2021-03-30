@@ -400,7 +400,7 @@ void glyph_texture_pack_and_update(VuiGlyphTextureId glyph_texture_id, GLuint te
 // here we decide which styled glyphs go in which glyph texture.
 // in our case all ASCII glyphs using the default font sizes of VUI (header and menu) to in one.
 // and the rest go in another.
-VuiGlyphTextureId vui_stbtt_get_styled_glyph_texture_id(VuiFontId font_id, float line_height, int32_t codept) {
+VuiGlyphTextureId app_vui_stbtt_get_styled_glyph_texture_id(VuiFontId font_id, float line_height, int32_t codept) {
 	if (codept >= 33 && codept <= 126) {
 		return app.ascii_glyph_texture_id;
 	} else {
@@ -511,6 +511,7 @@ void App_init() {
 	// initialize VUI.
 	// we pass in the position text function from the vui stb truetype shim.
 	//
+	vui_stbtt_get_styled_glyph_texture_id = app_vui_stbtt_get_styled_glyph_texture_id;
 	VuiSetup setup = {
 		.position_text_fn = vui_stbtt_position_text,
 		.position_text_userdata = NULL,

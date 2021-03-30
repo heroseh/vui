@@ -1,9 +1,9 @@
 #ifndef VUI_H
-#error "expected the VUI header to be included before this file."
+#include "vui.h"
 #endif
 
 #ifndef SDL_h_
-#error "expected the SDL2 header to be included before this file."
+#include <SDL2/SDL.h>
 #endif
 
 typedef struct _VuiSdl2InputState _VuiSdl2InputState;

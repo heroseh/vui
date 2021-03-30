@@ -1,37 +1,10 @@
+#ifndef VUI_H
+#include "vui.h"
+#endif
 
-// ===========================================================================================
-//
-//
-// memory allocation - element pool
-//
-//
-// ===========================================================================================
-
-typedef uint32_t VuiPoolId;
-
-typedef struct _VuiPool _VuiPool;
-struct _VuiPool {
-	/*
-	uint8_t is_allocated_bitset[(cap / 8) + 1]
-	T elements[cap]
-	*/
-	void* data;
-	uint32_t elmts_start_byte_idx;
-	uint32_t count;
-	uint32_t cap;
-	uint32_t free_list_head_id;
-};
-
-#define VuiPool(T) VuiPool_##T
-
-#define typedef_VuiPool(T) \
-typedef struct { \
-	T* VuiPool_data; \
-	uint32_t elmts_start_byte_idx; \
-	uint32_t count; \
-	uint32_t cap; \
-	uint32_t free_list_head_id; \
-} VuiPool_##T;
+#include <stddef.h>
+#include <stdarg.h>
+#include <signal.h>
 
 // ===========================================================================================
 //
@@ -2618,8 +2591,10 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 	ctrl->render_fn = render_fn;
 	ctrl->styles = styles;
 
-	VuiBool is_disabled = vui_false;
-	if (VuiStk_count(_vui.build.disabled_stack)) {
+	//
+	// try to inherit the disabled state from the parent if it is on
+	VuiBool is_disabled = (parent_ctrl->state_flags & VuiCtrlStateFlags_disabled) != 0;
+	if (!is_disabled && VuiStk_count(_vui.build.disabled_stack)) {
 		is_disabled = VuiStk_last(_vui.build.disabled_stack);
 	}
 
@@ -2629,22 +2604,22 @@ void vui_ctrl_start_(VuiCtrlSibId sib_id, VuiCtrlFlags flags, VuiActiveChange ac
 		ctrl->state_flags &= ~VuiCtrlStateFlags_disabled;
 	}
 
+	//
+	// set or unset active if it was changed externally
+	if (active_change > 0) {
+		active_change -= 1;
+		if (active_change) {
+			ctrl->state_flags |= VuiCtrlStateFlags_active;
+		} else {
+			ctrl->state_flags &= ~VuiCtrlStateFlags_active;
+		}
+	}
+
 	if (is_disabled) {
 		ctrl->focus_state = 0;
 	} else if (flags & VuiCtrlFlags_focusable) {
 		VuiFocusState focus_state = _vui_ctrl_focus_state(ctrl->id, !!(flags & VuiCtrlFlags_focusable_no_keyboard_actions));
 		ctrl->focus_state = focus_state;
-
-		//
-		// set or unset active if it was changed externally
-		if (active_change > 0) {
-			active_change -= 1;
-			if (active_change) {
-				ctrl->state_flags |= VuiCtrlStateFlags_active;
-			} else {
-				ctrl->state_flags &= ~VuiCtrlStateFlags_active;
-			}
-		}
 
 		//
 		// handled pressable and toggleable controls active state.
@@ -3219,8 +3194,13 @@ VuiBool _vui_slider(VuiCtrlSibId sib_id, void* value_out, void* min, void* max, 
 
 		//
 		// create the bar of the slider. the bar is shrunk by the button width and the margin to fit it inside the parent's clipping rectangle.
-		float parent_inner_width = VuiRect_width(&parent->rect) - VuiThickness_horizontal(&style->padding) - style->border_width * 2.f;
-		float bar_width = parent_inner_width - style->button_width - VuiThickness_horizontal(&bar_styles->margin);
+		float parent_width = VuiRect_width(&parent->rect);
+		float parent_inner_width = 0.f;
+		float bar_width = 0.f;
+		if (parent_width != 0.f) {
+			parent_inner_width = parent_width - VuiThickness_horizontal(&style->padding) - style->border_width * 2.f;
+			bar_width = parent_inner_width - style->button_width - VuiThickness_horizontal(&bar_styles->margin);
+		}
 		vui_scope_width(bar_width)
 		vui_scope_height(style->bar_height)
 		vui_scope_offset(style->button_width * 0.5f, style->button_width * 0.25f)
@@ -3760,22 +3740,9 @@ static VuiBool _vui_text_box(VuiCtrlSibId sib_id, char* string_in_out, uint32_t 
 			uint32_t cursor_idx = _vui.input.focused_text_box.cursor_idx + _vui.input.focused_text_box.select_offset;
 			VuiVec2 cursor_offset = vui_get_text_cursor_pos(_vui.input.focused_text_box.string, _vui.input.focused_text_box.string_len, 0.f, text_styles->font_id, text_styles->text_line_height, cursor_idx);
 
-			//
-			// move the scroll offset for the x axis
-			// cursor_offset_rel_x is if we remove the scroll offset from our cursor_offset.
-			// this is then used to see if the cursor falls outside of the text box.
-			//
 
-			float scroll_offset_x = ctrl->scroll_offset.x;
-			float cursor_offset_rel_x = cursor_offset.x + scroll_offset_x;
-
-			if (cursor_offset_rel_x >= box_inner_size_x) {
-				scroll_offset_x -= (cursor_offset_rel_x - box_inner_size_x) + style->cursor_width + margin_padding_x;
-			} else if (cursor_offset_rel_x < 0.f) {
-				scroll_offset_x += (0.f - cursor_offset_rel_x) + style->cursor_width + margin_padding_x;
-			}
-
-			scroll_offset_x = vui_clamp(scroll_offset_x, -cursor_offset.x, 0.f);
+			float scroll_offset_x = -cursor_offset.x + box_inner_size_x;
+			scroll_offset_x = vui_min(scroll_offset_x, 0.f);
 
 			ctrl->scroll_offset.x = scroll_offset_x;
 
@@ -4958,12 +4925,11 @@ void _vui_layout_column_row(
 	float layout_spacing = ctrl->attributes.layout_spacing;
 	while (child) {
 		VuiCtrl* child_line_start = child;
-		*fill_portion_wrap_dir_len_ptr = 0.f;
 		float max_wrap_dir_len = 0.0;
 		if (wrap || inner_wrap_dir_len == vui_auto_len) {
 			//
 			// because we are wrapping or our wrap directional length is automatic.
-			// loop until we have reached the end of the line and find the tallest control.
+			// loop until we have reached the end of the line and find the tallest(for column)/widest(for row) control.
 			float end_dir_coord = 0.f;
 			VuiBool is_first = vui_true;
 			*child_placement_area_ptr = VuiRect_init_wh(dir_start, wrap_dir_start, 0, 0);
@@ -5034,7 +5000,9 @@ void _vui_layout_column_row(
 			child_placement_area_dir_len_end = &child_placement_area_ptr->bottom;
 		}
 
-		for (VuiCtrl* line_child = child_line_start; line_child != child; line_child = line_child->sibling_next_id ? vui_ctrl_get(line_child->sibling_next_id) : NULL) {
+		VuiCtrl* line_child;
+		VuiCtrl* last_child;
+		for (line_child = child_line_start; line_child != child; line_child = line_child->sibling_next_id ? vui_ctrl_get(line_child->sibling_next_id) : NULL) {
 			VuiRect* cpa = child_placement_area_ptr;
 			if (!(line_child->flags & _VuiCtrlFlags_is_popover)) {
 				// so the control can just position itself within it.
@@ -5049,6 +5017,7 @@ void _vui_layout_column_row(
 				// advance to the next cell, recalculate the end as it can be different this time.
 				*child_placement_area_dir_len_start = *child_placement_area_dir_len_start + dir_rect_len(&line_child->rect) + fabsf(offset_dir_len(line_child->attributes.offset)) + layout_spacing;
 			}
+			last_child = line_child;
 		}
 
 		// advance to the new line
@@ -5057,9 +5026,11 @@ void _vui_layout_column_row(
 			wrap_dir_start += wrap_spacing;
 		}
 
+		float end_coord = *child_placement_area_dir_len_start - layout_spacing;
+
 		// track the max bottom right for auto sized layouts
-		if (*child_placement_area_dir_len_end > *max_dir_inner_len_ptr) {
-			*max_dir_inner_len_ptr = *child_placement_area_dir_len_end;
+		if (end_coord > *max_dir_inner_len_ptr) {
+			*max_dir_inner_len_ptr = end_coord;
 		}
 		*max_wrap_dir_inner_len_ptr = wrap_dir_start;
 	}
@@ -5573,8 +5544,16 @@ void vui_window_end() {
 				break;
 		}
 
-		_vui_layout_ctrls_finalize(popover_ctrl, offset, root->attributes.width, vui_true);
+		//
+		// make sure the popover doesn't go outside the boundary of the window
+		VuiVec2 start = VuiVec2_add(popover_ctrl->rect.left_top, offset);
+		if (start.x < 0) offset.x -= start.x;
+		if (start.y < 0) offset.y -= start.y;
+		VuiVec2 end = VuiVec2_add(popover_ctrl->rect.right_bottom, offset);
+		if (end.x > root->rect.ex) offset.x -= end.x - root->rect.ex;
+		if (end.y > root->rect.ey) offset.y -= end.y - root->rect.ey;
 
+		_vui_layout_ctrls_finalize(popover_ctrl, offset, root->attributes.width, vui_true);
 CONTINUE: {}
 	}
 

@@ -1,6 +1,16 @@
 #ifndef VUI_STBTT_MANAGER_H
 #define VUI_STBTT_MANAGER_H
 
+#ifndef VUI_H
+#include "vui.h"
+#endif
+
+#ifndef __STB_INCLUDE_STB_TRUETYPE_H__
+#include "stb_truetype.h"
+#endif
+
+#include <stdint.h>
+
 typedef uint32_t VuiGlyphTextureId;
 
 //
@@ -12,7 +22,7 @@ typedef uint32_t VuiGlyphTextureId;
 //             and then you may also want the rest of the unicode characters to be in a different that is glyph texture that is
 //             cleared and repacked every fram.
 //
-VuiGlyphTextureId vui_stbtt_get_styled_glyph_texture_id(VuiFontId font_id, float line_height, int32_t codept);
+extern VuiGlyphTextureId (*vui_stbtt_get_styled_glyph_texture_id)(VuiFontId font_id, float line_height, int32_t codept);
 
 //
 // creates a font

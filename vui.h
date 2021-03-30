@@ -15,7 +15,7 @@
 //
 // ===========================================================================================
 
-#define VUI_DEBUG_CTRL_LAYOUT 0
+#define VUI_DEBUG_CTRL_LAYOUT 1
 
 #define vui_debug_ctrl_layout_dump_file_path "/tmp/vui_ctrls"
 #define vui_text_box_select_scroll_amount 4.0f
@@ -37,15 +37,16 @@
 // you can to extend the sizes, colors or children of the VuiCtrlStyle
 // by defining the macros below.
 // EG:
-// #define inline_VuiCtrlStyleUserExtColors \
-//     struct { \
-//         VuiColor my_button_style_attribute; \
-//         struct { \
-//             VuiColor my_text_box_style_attribute_1; \
-//             VuiColor my_text_box_style_attribute_2; \
-//         } \
-//     }
-//
+#if 0
+#define inline_VuiCtrlStyleUserExtColors \
+    struct { \
+        VuiColor my_button_style_attribute; \
+        struct { \
+            VuiColor my_text_box_style_attribute_1; \
+            VuiColor my_text_box_style_attribute_2; \
+        } \
+    }
+#endif
 
 #ifndef inline_VuiCtrlStyleUserExtColors
 #define inline_VuiCtrlStyleUserExtColors
@@ -730,6 +731,7 @@ enum {
 	_VuiCtrlFlags_is_laid_out = 0x40000,
 	_VuiCtrlFlags_is_popover_open = 0x80000,
 	_VuiCtrlFlags_is_canvas = 0x100000,
+	_VuiCtrlFlags_is_removing = 0x200000,
 };
 
 typedef uint8_t VuiLayoutType;
@@ -1569,6 +1571,50 @@ extern void vui_window_dump_render(VuiWindowId id, FILE* file);
 // allocate zeroed memory that is cleared at the end of the frame.
 #define vui_frame_data_alloc_elmt(T) (T*)vui_frame_data_alloc(sizeof(T), alignof(T));
 extern void* vui_frame_data_alloc(uint32_t size, uint32_t align);
+
+// ===========================================================================================
+//
+//
+// memory allocation - element pool
+//
+//
+// ===========================================================================================
+
+typedef uint32_t VuiPoolId;
+
+typedef struct _VuiPool _VuiPool;
+struct _VuiPool {
+	/*
+	uint8_t is_allocated_bitset[(cap / 8) + 1]
+	T elements[cap]
+	*/
+	void* data;
+	uint32_t elmts_start_byte_idx;
+	uint32_t count;
+	uint32_t cap;
+	uint32_t free_list_head_id;
+};
+
+#define VuiPool(T) VuiPool_##T
+
+#define typedef_VuiPool(T) \
+typedef struct { \
+	T* VuiPool_data; \
+	uint32_t elmts_start_byte_idx; \
+	uint32_t count; \
+	uint32_t cap; \
+	uint32_t free_list_head_id; \
+} VuiPool_##T;
+
+VuiBool _VuiPool_resize_cap(_VuiPool* pool, uint32_t new_cap, uintptr_t elmt_size, uintptr_t elmt_align);
+VuiBool _VuiPool_reset_and_populate(_VuiPool* pool, void* elmts, uint32_t count, uintptr_t elmt_size, uintptr_t elmt_align);
+void _VuiPool_init(_VuiPool* pool, uint32_t cap, uintptr_t elmt_size, uintptr_t elmt_align);
+void _VuiPool_deinit(_VuiPool* pool, uintptr_t elmt_size, uintptr_t elmt_align);
+void* _VuiPool_alloc(_VuiPool* pool, VuiPoolId* id_out, uintptr_t elmt_size, uintptr_t elmt_align);
+void _VuiPool_assert_id(_VuiPool* pool, uint32_t elmt_id);
+void _VuiPool_dealloc(_VuiPool* pool, uint32_t elmt_id, uintptr_t elmt_size, uintptr_t elmt_align);
+void* _VuiPool_id_to_ptr(_VuiPool* pool, VuiPoolId elmt_id, uintptr_t elmt_size);
+VuiPoolId _VuiPool_ptr_to_id(_VuiPool* pool, void* ptr, uintptr_t elmt_size);
 
 #endif // VUI_H
 

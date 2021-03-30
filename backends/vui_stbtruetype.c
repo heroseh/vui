@@ -1,3 +1,10 @@
+#ifndef VUI_H
+#include "vui.h"
+#endif
+
+#ifndef VUI_STBTT_H
+#include "vui_stbtruetype.h"
+#endif
 
 VuiPositionTextRet vui_stbtt_position_text(VuiPositionTextArgs* args) {
 	if (args->text_length == 0) { return (VuiPositionTextRet){ .vec2 = VuiVec2_zero }; }

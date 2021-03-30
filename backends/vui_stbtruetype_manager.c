@@ -1,3 +1,12 @@
+#ifndef VUI_STBTT_MANAGER_H
+#include "vui_stbtruetype_manager.h"
+#endif
+
+#ifndef __STB_INCLUDE_STB_TRUETYPE_H__
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
+#endif
+
 #ifndef vui_stbtt_glyph_texture_default_width_and_height
 #define vui_stbtt_glyph_texture_default_width_and_height 512
 #endif
@@ -149,6 +158,8 @@ static VuiBool _vui_stbtt_glyph_texture_add_empty_rect(_VuiStbttGlyphTexture* te
 //
 //
 // ==========================================================
+
+VuiGlyphTextureId (*vui_stbtt_get_styled_glyph_texture_id)(VuiFontId font_id, float line_height, int32_t codept);
 
 VuiFontId vui_stbtt_font_add(const uint8_t* font_file_bytes) {
 	//

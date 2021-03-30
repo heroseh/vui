@@ -1,6 +1,14 @@
 #ifndef VUI_STBTT_H
 #define VUI_STBTT_H
 
+#ifndef VUI_H
+#include "vui.h"
+#endif
+
+#ifndef __STB_INCLUDE_STB_TRUETYPE_H__
+#include "stb_truetype.h"
+#endif
+
 // =====================================================================
 //
 // YOU NEED TO IMPLEMENT these functions if you have your own Font Manager and texture packer system.
