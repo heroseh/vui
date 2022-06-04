@@ -11,7 +11,7 @@ Inspired by (in no particular order):
 - [Handmade Network Podcast with Micha Mettke](https://handmade.network/podcast/ep/c1174949-adc4-492d-89b5-ca73dea4ff16)
 
 # Features
-- No dependencies (expect libc)
+- No dependencies (except libc)
 	- But requires hooking up to sub systems of your application. See the **backends** directory.
 - Basic Controls (Buttons, Check Box, Radio Button, Progress Bar, Text Box, Input Box, Scroll View, Sliders, Multi Line Text Box)
 - Advance Layout System
